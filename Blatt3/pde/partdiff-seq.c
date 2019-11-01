@@ -186,13 +186,13 @@ getResiduum (struct calculation_arguments* arguments, struct options* options, d
 {
 	if (options->inf_func == FUNC_F0)
 	{
-		return ((-star) / 4.0);
+		return (star / 4.0);
 	}
 	else
 	{
 		double h = arguments->h;
 		double Pih = PI * h;
-		return ((TWO_PI_SQUARE * sin((double)(y) * Pih) * sin(x * Pih) * arguments->hsquare - star) / 4.0);
+		return ((TWO_PI_SQUARE * sin((double)(y) * Pih) * sin(x * Pih) * arguments->hsquare + star) / 4.0);
 	}
 }
 
@@ -235,7 +235,7 @@ calculate (struct calculation_arguments* arguments, struct calculation_results *
 			/* over all rows */
 			for (j = 1; j < N; j++)
 			{
-				star = -M2[i-1][j] - M2i[j-1] - M2i[j+1] - M2[i+1][j] + 4.0 * M2i[j];
+				star = M2[i-1][j] + M2i[j-1] + M2i[j+1] + M2[i+1][j] - 4.0 * M2i[j];
 
 				residuum = getResiduum(arguments, options, di, j, star);
 				korrektur = residuum;
