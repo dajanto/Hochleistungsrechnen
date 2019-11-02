@@ -71,12 +71,12 @@ Variabel "PIh = PI * arguments->h" extrahiert werden.
 Auch wird in jedem Schleifendurchlauf der inneren Schleife die Variabel i 
 als int x an getResiduum übergeben und dort zu einem double gecastet.
 Dies kann in der Schleife von i extrahiert werden.
-In f2 wird dazu auch jedesmal "arguments->h * arguments->h" berechnet.
+In f2 wird dazu auch jedesmal "arguments->h * arguments->h * TWO_PI_SQUARE" berechnet.
 Dies kann durch Modifikation von calculation_arguments in der Funktion "initVariables"
-berechnet und in "arguments" gespeichert werden.
+einmalig berechnet und in "arguments" gespeichert werden.
 Es entstehen dadurch folgende Laufzeiten:
 f1: 5.471182 s
-f2: 21.943690 s
+f2: 20.626085 s
 
 Es erfolgt Beschleunigung von ~20s für f2 und ~0.5s für f1, wobei die Beschleunigung für f1
 ich mir nicht erklären kann.

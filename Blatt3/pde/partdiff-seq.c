@@ -31,7 +31,8 @@ struct calculation_arguments
 	double  ***Matrix;      /* index matrix used for addressing M             */
 	double  *M;             /* two matrices with real values                  */
 	double  h;              /* length of a space between two lines            */
-	double  hsquare;        /* square of h                                    */
+	double  h_square_two_pi_square; /* product of square of h and TWO_PI_SQUARE */
+	double  PIh;            /* product of pi and h                            */
 };
 
 struct calculation_results
@@ -60,7 +61,8 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
 	arguments->N = options->interlines * 8 + 9 - 1;
 	arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
 	arguments->h = (float)( ( (float)(1) ) / (arguments->N));
-	arguments->hsquare = arguments->h * arguments->h;
+	arguments->h_square_two_pi_square = arguments->h * arguments->h * TWO_PI_SQUARE;
+	arguments-> PIh = arguments-> h * PI;
 
 	results->m = 0;
 	results->stat_iteration = 0;
@@ -190,8 +192,7 @@ getResiduum (struct calculation_arguments* arguments, struct options* options, d
 	}
 	else
 	{
-		double Pih = PI * arguments->h;
-		return ((TWO_PI_SQUARE * sin((double)(y) * Pih) * sin(x * Pih) * arguments->hsquare - star) / 4.0);
+		return ((sin((double)(y) * arguments->PIh) * sin(x * arguments->PIh) * arguments->h_square_two_pi_square - star) / 4.0);
 	}
 }
 
