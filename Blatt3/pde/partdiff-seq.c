@@ -226,23 +226,21 @@ calculate (struct calculation_arguments* arguments, struct calculation_results *
 	while (options->term_iteration > 0)
 	{
 		maxresiduum = 0;
-		double **M2 = Matrix[m2];
 		/* over all columns */
 		for (i = 1; i < N; i++)
 		{
-			double *M2i = M2[i];
 			double di = (double) i;
 			/* over all rows */
 			for (j = 1; j < N; j++)
 			{
-				star = M2[i-1][j] + M2i[j-1] + M2i[j+1] + M2[i+1][j] - 4.0 * M2i[j];
+				star = Matrix[m2][i-1][j] + Matrix[m2][i][j-1] + Matrix[m2][i][j+1] + Matrix[m2][i+1][j] - 4.0 * Matrix[m2][i][j];
 
 				residuum = getResiduum(arguments, options, di, j, star);
 				korrektur = residuum;
 				residuum = (residuum < 0) ? -residuum : residuum;
 				maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
 
-				Matrix[m1][i][j] = M2i[j] + korrektur;
+				Matrix[m1][i][j] = Matrix[m2][i][j] + korrektur;
 			}
 		}
 
