@@ -89,5 +89,5 @@ Es entstehen dadurch folgende Laufzeiten:
 f1: 4.908225 s
 f2: 22.476069 s
 
-Es erfolgt eine Verlangsamung für f2, bei f1 auch nur um ~0.5s.
+Es erfolgt eine Verlangsamung für f2, bei f1 auch nur eine Beschleunigung um ~0.5s.
 Dadurch ist diese angebliche Optimierung überflüssig.
