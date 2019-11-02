@@ -1,0 +1,93 @@
+Aufgabe 1
+1. 
+Batch Queuing ist eine Art Jobs zu verwalten. 
+Dabei werden Jobs in einer Queue abgearbeitet, was unter 
+anderem auch an Bedingungen geknüpft sein kann.
+
+2.
+Ein Batch-Queuing-System ist eine Software welches Jobs automatisch ausführt.
+Es werden je nach System auch die angeforderten Ressourcen automatisch verwaltet,
+z.B. bei einem Cluster werden dann die benötigten Nodes auf Zeit zugeteilt.
+
+3.
+Einige Beispiele für Batch-Queuing-Systeme wären, Portable Batch System,
+Slurm Workload Manager und Condor.
+
+4.
+Auf dem Cluster wird das Batch-Queuing-System "Slurm" verwendet.
+
+5.
+sBatch queued ein Skript als Job in Slurm ein. Dabei kann der Job durch
+Commando Argumenten und Optionen oder durch #SBATCH Optionen im Skript 
+angepasst werden. Das Standard Output und Error werden in eine Datei 
+mit den Muster "slurm-%j.out" umgeleitet und das Skript auf der ersten
+Node bei Ausführung des Jobs einmal ausgeführt.
+
+6.
+Mit den Befehl "smap" können die momentanen Jobs und deren 
+Zustand angezeigt werden.
+
+7.
+"sview" bietet gegenüber von smap einen leichteren Zugriff auf Informationen.
+So können leicht zwischen den einzelnen Modi gewechselt werden, ohne das Programm
+zu verlassen. Die Jobs und Partitionen können damit auch verwaltet werden, anstatt sie nur 
+zu betrachten.
+
+8.
+Mit "sview" können Jobs in jedem Zustand verwaltet werden, sei es um sie zu
+beenden, neu in die Queue zu legen oder weiteres.
+
+9.
+Momentan kann ein Knoten von nur einen Job und Nutzer gleichzeitig genutzt werden.
+
+10.
+Es kann auf detaillierte Informationen über einen Job mithilfe von "sview"
+zugegriffen werden. Dabei wird im Kontextmenu eines Jobs "Full Info" ausgewählt.
+
+11.
+Solange des Scheduling von Slurm selbst verwaltet wird, gibt es zwei 
+verschiedene Scheduling Verfahren: sched/builtin und sched/backfill.
+Bei builtin laufen alle Jobs in der Ordnung ihrer Prioritäten, bei 
+backfill können Jobs früher starten, wenn es untätige Knoten gibt
+und vor Jobs mit höherer Prioritäten fertig werden.
+
+12.
+buchhardt@cluster:~$ salloc -p west -N 1
+salloc: Granted job allocation 23536
+buchhardt@cluster:~$ srun hostname
+west1
+buchhardt@cluster:~$ exec
+
+13.
+Das Timeout liegt bei 6 Stunden.
+
+14.
+Über "sview" -> Kontextmenu des Jobs -> "Full Info" kann man die Priorität
+eines Jobs einsehen.
+
+15.
+Auf dem Cluster sind die Partitionen abu, amd, magny, nehalem, west  benutzbar.
+Es scheint noch eine Partition "Sandy" zu geben (sview), die aber nicht nutzbar zu sein scheint.
+Die zu nutzende Partition kann über salloc mit der -p Optionen festgelegt werden
+oder im Skript über sBatch z.B. mit dem "#SBATCH --partition=partition_name" Direktiv.
+
+Aufgabe 2
+Bei mehrmaliger Ausführung von job_script fällt auf, das die Zeiten von den
+Ausgaben, die auf demselben Knoten erstellt wurden, zeitlich am meisten
+beinanderstehen.
+Es gibt keine besondere Reihenfolge in der die Ausgabe von den Knoten ausgegeben
+werden, sie erscheinen auf Dauer eher zufällig. Die zeitlichen Unterschiede liegen
+bei einigen hundert Nanosekunden auf demselben Knoten und bis zu 50ms Sekunden
+bei unterschiedlichen Knoten.
+Die Zeit einen Aufgabe auf demselben Knoten zu starten sollte immer kleiner sein,
+als Aufgaben auf verschiedenen Knoten zu starten, da es dort einen größeren 
+Kommunikationsweg gibt.
+Es werden nicht immer dieselben Knoten allokiert, d.h. der Laufweg zwischen den Knoten
+und dem Scheduler ist selten, bis nie gleich. Auch wird die Ausführung auf dem Knoten
+selten immer gleich ablaufen, da sich der Knoten nie im exakt selben Zustand befindet,
+wie bei der vorherigen Ausführung, zum Beispiel durch das System was den Knoten steuert. 
+
+timescript kann die Datei timescript.out auch erzeugen, es muss aber darauf
+geachtet werden, dass die Datei nicht auf jedenfall neu erzeugt wird (zum Beispiele
+mit dem Umleiten vom Output mithilfe des ">" Operators), sondern nicht destruktiv angefügt
+wird (z.B. mit dem ">>" Operator).

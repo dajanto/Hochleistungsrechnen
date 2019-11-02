@@ -1,0 +1,93 @@
+Im folgenden wird die Störfunktion f(x,y)=0 als f1 und
+f(x,y)=2pi^2*sin(pi*x)sin(pi*y) als f2 bezeichnet.
+Abgesehen vom den gprof Ergebnissen, die auf dem Cluster erzeugt
+wurden, sind alle Ergebnisse auf einen Windows Subsystem für Linux
+mit Ubuntu erzeugt worden, was wiederum die Ergebnisse verfälschen kann.
+gprof war nur auf dem Cluster nutzbar, perf war weder auf WSL noch cluster nutzbar.
+
+Die Ausführung ohne Optimierungen ergibt über gprof die zwei
+Funktionen, die am meisten Zeit brauchen:
+
+Störfunktion f1:
+Each sample counts as 0.01 seconds.
+%   cumulative   self              self     total           
+time   seconds   seconds    calls   s/call   s/call  name    
+95.14    123.81   123.81        1   123.81   129.74  calculate
+4.56    129.74     5.93 2758256640     0.00     0.00  getResiduum
+
+Störfunktion f2
+Each sample counts as 0.01 seconds.
+%   cumulative   self              self     total           
+time   seconds   seconds    calls   s/call   s/call  name    
+91.12     68.68    68.68        1    68.68    75.18  calculate
+8.64     75.18     6.51 1379128320     0.00     0.00  getResiduum
+
+Dabei stimmt die Dauer der Ausführung nicht komplett, 
+so war es für die obige Ausführungen 50s mehr als angegeben.
+Man kann aber sehen das ohne richtige Störfunktion der Zeitanteil
+von getResiduum prozentual erheblich kleiner ist.
+
+Ohne jegliche Optimierungen sind die Laufzeiten für partdiff-seq:
+f1: 93.760364 s
+f2: 90.589751 s
+
+Es können nun jeweils die Optimierungsstufen vom gcc Kompiler erhöht werden,
+dann kommt man auf folgende Zeiten:
+-O1: 
+f1: 12.482639 s
+f2: 63.237316 s
+
+-O2: 
+f1: 12.706079 s
+f2: 63.288829 s
+
+-O3: 
+f1: 11.453476 s
+f2: 52.001382 s
+
+Ab der Optimierungsstufe O2 kann jedoch kein richtiges gmon.out erzeugt werden.
+Es ist leicht erkennbar das die Optimierungsstufe O3 den größten Laufzeitgewinn
+für f1 als auch f2 darstellt.
+
+Nun wird am Code zuerst versucht die Funktion "calculate" zu optimieren, da 
+dort am meisten Zeit verbracht wird.
+
+Die nächste Optimierung ist die Zugriff auf Matrix mit den Indices j und i.
+Es wird über den äußeren (Spalten-) Index i in der inneren Schleife und über den 
+inneren (Zeilen-) Index j in der äußeren Schleife j iteriert. 
+Dies verlangsamt das Programm da die Zeilen nicht hintereinander abgerufen werden,
+sondern spaltenweise, d.h. der Cache wird nicht optimal genutzt.
+
+Werden die Variable i der inneren mit der Variablen j der äußeren Schleife vertauscht,
+kommt man auf folgende Laufzeiten:
+f1: 6.072425 s
+f2: 41.372888 s
+Es folgt also eine Beschleunigung von ~5s für f1 und ~11s für f2.
+
+Es nächstes kann die Berechnung von f2 optimiert werden, 
+indem sich wiederholende Aktionen extra gespeichert werden.
+So wird in der Formal "PI * arguments->h" zweimal berechnet, kann also in die
+Variabel "PIh = PI * arguments->h" extrahiert werden.
+Auch wird in jedem Schleifendurchlauf der inneren Schleife die Variabel i 
+als int x an getResiduum übergeben und dort zu einem double gecastet.
+Dies kann in der Schleife von i extrahiert werden.
+In f2 wird dazu auch jedesmal "arguments->h * arguments->h * TWO_PI_SQUARE" berechnet.
+Dies kann durch Modifikation von calculation_arguments in der Funktion "initVariables"
+einmalig berechnet und in "arguments" gespeichert werden.
+Es entstehen dadurch folgende Laufzeiten:
+f1: 5.471182 s
+f2: 20.626085 s
+
+Es erfolgt Beschleunigung von ~20s für f2 und ~0.5s für f1, wobei die Beschleunigung für f1
+ich mir nicht erklären kann.
+
+Als letztes hätte man noch die Berechnung und Verwendung der Variabel "star" optimieren können.
+"star" wird nur in getResiduum verwendet, dazu auch noch nur negiert.
+Diese Negation kann weggelassen werden, indem bei der Berechnung von "star" alle Vorzeichen
+umgekehrt werden.
+Es entstehen dadurch folgende Laufzeiten:
+f1: 4.908225 s
+f2: 22.476069 s
+
+Es erfolgt eine Verlangsamung für f2, bei f1 auch nur eine Beschleunigung um ~0.5s.
+Dadurch ist diese angebliche Optimierung überflüssig.

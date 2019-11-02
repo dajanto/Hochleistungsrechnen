@@ -31,6 +31,8 @@ struct calculation_arguments
 	double  ***Matrix;      /* index matrix used for addressing M             */
 	double  *M;             /* two matrices with real values                  */
 	double  h;              /* length of a space between two lines            */
+	double  h_square_two_pi_square; /* product of square of h and TWO_PI_SQUARE */
+	double  PIh;            /* product of pi and h                            */
 };
 
 struct calculation_results
@@ -59,6 +61,8 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
 	arguments->N = options->interlines * 8 + 9 - 1;
 	arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
 	arguments->h = (float)( ( (float)(1) ) / (arguments->N));
+	arguments->h_square_two_pi_square = arguments->h * arguments->h * TWO_PI_SQUARE;
+	arguments-> PIh = arguments-> h * PI;
 
 	results->m = 0;
 	results->stat_iteration = 0;
@@ -180,7 +184,7 @@ initMatrices (struct calculation_arguments* arguments, struct options* options)
 /* Input: x,y - actual column and row                                       */
 /* ************************************************************************ */
 double
-getResiduum (struct calculation_arguments* arguments, struct options* options, int x, int y, double star)
+getResiduum (struct calculation_arguments* arguments, struct options* options, double x, int y, double star)
 {
 	if (options->inf_func == FUNC_F0)
 	{
@@ -188,7 +192,7 @@ getResiduum (struct calculation_arguments* arguments, struct options* options, i
 	}
 	else
 	{
-		return ((TWO_PI_SQUARE * sin((double)(y) * PI * arguments->h) * sin((double)(x) * PI * arguments->h) * arguments->h * arguments->h - star) / 4.0);
+		return ((sin((double)(y) * arguments->PIh) * sin(x * arguments->PIh) * arguments->h_square_two_pi_square - star) / 4.0);
 	}
 }
 
@@ -222,16 +226,16 @@ calculate (struct calculation_arguments* arguments, struct calculation_results *
 	while (options->term_iteration > 0)
 	{
 		maxresiduum = 0;
-
-		/* over all rows */
-		for (j = 1; j < N; j++)
+		/* over all columns */
+		for (i = 1; i < N; i++)
 		{
-			/* over all columns */
-			for (i = 1; i < N; i++)
+			double di = (double) i;
+			/* over all rows */
+			for (j = 1; j < N; j++)
 			{
 				star = -Matrix[m2][i-1][j] - Matrix[m2][i][j-1] - Matrix[m2][i][j+1] - Matrix[m2][i+1][j] + 4.0 * Matrix[m2][i][j];
 
-				residuum = getResiduum(arguments, options, i, j, star);
+				residuum = getResiduum(arguments, options, di, j, star);
 				korrektur = residuum;
 				residuum = (residuum < 0) ? -residuum : residuum;
 				maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
