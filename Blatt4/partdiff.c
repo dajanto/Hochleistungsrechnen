@@ -528,8 +528,8 @@ calculate_p_rows (struct calculation_arguments const* arguments, struct calculat
 
 		maxresiduum = 0;
 
-		#pragma omp parallel for private(i, j, star, residuum, maxresiduum)
 		/* over all rows */
+		#pragma omp parallel for private(i, j, star, residuum, maxresiduum)
 		for (i = 1; i < N; i++)
 		{
 			double fpisin_i = 0.0;
@@ -692,6 +692,7 @@ main (int argc, char** argv)
 	initMatrices(&arguments, &options);
 
 	gettimeofday(&start_time, NULL);
+
 	#ifdef ROWS
 		calculate_p_rows(&arguments, &results, &options);
 	#elif COLUMNS
