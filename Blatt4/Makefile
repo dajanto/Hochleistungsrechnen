@@ -2,18 +2,27 @@
 CC = gcc
 
 # Compiler flags, paths and libraries
-CFLAGS = -std=c11 -pedantic -Wall -Wextra -O3 -ggdb
+CFLAGS = -std=c11 -pedantic -Wall -Wextra -O3 -ggdb -fopenmp
 LFLAGS = $(CFLAGS)
 LIBS   = -lm
 
-TGTS = partdiff
+TGTS = partdiff partdiff_p_rows partdiff_p_columns partdiff_p_elements
 OBJS = partdiff.o askparams.o
 
 # Targets ...
-all: partdiff
+all: $(TGTS)
 
 partdiff: $(OBJS) Makefile
 	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
+
+partdiff_p_rows: $(OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS) -D ROWS
+
+partdiff_p_columns: $(OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS) -D COLUMNS
+
+partdiff_p_elements: $(OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS) -D ELEMENTS
 
 partdiff.o: partdiff.c Makefile
 
