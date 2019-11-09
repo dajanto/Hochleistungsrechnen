@@ -326,7 +326,15 @@ calculate_p_elements (struct calculation_arguments const* arguments, struct calc
 
 		maxresiduum = 0;
 
-		
+		/* 
+		 two loops combined in a single loop to reduce possible overhead, by waiting
+		 after each inner loop 
+		 */
+		/* 
+		 if precision options should be used instead of iterations
+		 options as termination condition, the pragma needs to rewritten
+		 for 'maxresiduum', instead f private(maxresiduum) -> reduction(max, maxresiduum)
+		 */
 		/* over all elements */
 		#pragma omp parallel for private(star, residuum, maxresiduum)
 		for (index = N + 1; index < Nsquare; index++)
@@ -334,6 +342,7 @@ calculate_p_elements (struct calculation_arguments const* arguments, struct calc
 			i = index / N;
 			j = index % N;
 
+			/* because there is only a single loop, some redundant calculations are performed */
 			double fpisin_i = 0.0;
 
 			if (options->inf_func == FUNC_FPISIN)
@@ -430,7 +439,18 @@ calculate_p_columns (struct calculation_arguments const* arguments, struct calcu
 
 		maxresiduum = 0;
 
-		/* over all rows */
+		/* 
+		  The variables of inner and outer loop are switched
+		  so that it iterates over the columns of Matrix first.
+		  This eliminates the overhead of waiting at the end of
+		  the inner for loop. 
+		*/
+		/* 
+		 if precision options should be used instead of iterations
+		 options as termination condition, the pragma needs to rewritten
+		 for 'maxresiduum', instead f private(maxresiduum) -> reduction(max, maxresiduum)
+		 */
+		/* over all columns */
 		#pragma omp parallel for private(i, j, star, residuum, maxresiduum)
 		for (j = 1; j < N; j++)
 		{
@@ -533,6 +553,11 @@ calculate_p_rows (struct calculation_arguments const* arguments, struct calculat
 
 		maxresiduum = 0;
 
+		/* 
+		 if precision options should be used instead of iterations
+		 options as termination condition, the pragma needs to rewritten
+		 for 'maxresiduum', instead f private(maxresiduum) -> reduction(max, maxresiduum)
+		 */
 		/* over all rows */
 		#pragma omp parallel for private(i, j, star, residuum, maxresiduum)
 		for (i = 1; i < N; i++)
