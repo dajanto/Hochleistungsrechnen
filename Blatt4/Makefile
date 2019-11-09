@@ -6,11 +6,11 @@ CFLAGS = -std=c11 -pedantic -Wall -Wextra -O3 -ggdb -fopenmp
 LFLAGS = $(CFLAGS)
 LIBS   = -lm
 
-TGTS = partdiff partdiff_p_rows partdiff_p_columns partdiff_p_elements
+TGTS = partdiff partdiff-openmp-zeilen partdiff-openmp-element partdiff-openmp-spalten
 OBJS = partdiff.o askparams.o
-ROW_OBJS = partdiff_p_rows.o askparams.o
-ELEMENT_OBJS = partdiff_p_elements.o askparams.o
-COLUMN_OBJS = partdiff_p_columns.o askparams.o
+ROW_OBJS = partdiff-openmp-zeilen.o askparams.o
+ELEMENT_OBJS = partdiff-openmp-element.o askparams.o
+COLUMN_OBJS = partdiff-openmp-spalten.o askparams.o
 
 # Targets ...
 all: $(TGTS)
@@ -18,26 +18,29 @@ all: $(TGTS)
 partdiff: $(OBJS) Makefile
 	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
 
-partdiff_p_rows: $(ROW_OBJS) Makefile
-	$(CC) $(LFLAGS) -o $@ $(ROW_OBJS) $(LIBS) -D ROWS
+partdiff-openmp: $(ROW_OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(ROW_OBJS) $(LIBS)
 
-partdiff_p_columns: $(COLUMN_OBJS) Makefile
-	$(CC) $(LFLAGS) -o $@ $(COLUMN_OBJS) $(LIBS) -D COLUMNS
+partdiff-openmp-zeilen: $(ROW_OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(ROW_OBJS) $(LIBS)
 
-partdiff_p_elements: $(ELEMENT_OBJS) Makefile
-	$(CC) $(LFLAGS) -o $@ $(ELEMENT_OBJS) $(LIBS) -D ELEMENTS
+partdiff-openmp-spalten: $(COLUMN_OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(COLUMN_OBJS) $(LIBS)
+
+partdiff-openmp-element: $(ELEMENT_OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(ELEMENT_OBJS) $(LIBS)
 
 partdiff.o: partdiff.c Makefile
 
 askparams.o: askparams.c Makefile
 
-partdiff_p_rows.o: $(OBJS) Makefile
+partdiff-openmp-zeilen.o: $(OBJS) Makefile
 	$(CC) -o $@ -c $(CFLAGS) partdiff.c -D ROWS
 
-partdiff_p_columns.o: $(OBJS) Makefile
+partdiff-openmp-spalten.o: $(OBJS) Makefile
 	$(CC) -o $@ -c $(CFLAGS) partdiff.c -D COLUMNS
 
-partdiff_p_elements.o: $(OBJS) Makefile
+partdiff-openmp-element.o: $(OBJS) Makefile
 	$(CC) -o $@ -c $(CFLAGS) partdiff.c -D ELEMENTS
 
 # Rule to create *.o from *.c
