@@ -10,7 +10,7 @@ Verfahren: Jacobi
 Ausführungsort: Knoten (west4) auf dem Cluster
 
 Messwerte: 
-Threads     partdiff (s)    partdiff-openmp-zeilen (s)  Speedup-Seq     Speedup-1-Thread
+Threads     partdiff [s]    partdiff-openmp-zeilen [s]  Speedup-Seq     Speedup-1-Thread
 1           791.25          782.90                      1.01            1.00
 2           791.25          391.77                      2.02            2.00
 3           791.25          263.29                      3.00            2.97
@@ -34,7 +34,11 @@ Die Skalierung ist hier nahezu linear, da es genügend Arbeit für jeden Thread
 vorhanden ist. Die For-Schleifen nehmen auch einen großteil der Arbeitszeit
 in Anspruch d.h. der Overhead für die Parallelisierung innerhalb der 
 while-Schleife ist verhältnismäßig klein im Vergleich zu dem Zeitgewinn.
-Anfangs ist ein fast linear Speedup zu beobachten, wobei 
+Anfangs ist ein fast linear Speedup zu beobachten, wobei  die Wachstumsrate
+mit zunehmender Threadanzahl abnimmt. Es ist zu vermuten, das der Aufwand
+und damit der Zeitverbrauch der Verwaltung der Threads und Datenaufteilung 
+schneller wächst, als der Zeitgewinn durch die Parallelisierung auf mehr
+Threads.   
 
 Messung 2:
 Iterationen: 1500
@@ -44,7 +48,7 @@ Thread: 12
 Ausführungsort: Knoten (west7) auf dem Cluster
 
 Messwerte:
-Interlines  partdiff-openmp-zeilen (s)  Zeit (s) pro Interline
+Interlines  partdiff-openmp-zeilen [s]  Zeit [s] pro Interline
 1           0.05                        0.0500
 2           0.06                        0.0300
 4           0.11                        0.0275
@@ -60,3 +64,12 @@ Interlines  partdiff-openmp-zeilen (s)  Zeit (s) pro Interline
 Visualisierung: speedup-interlines.pdf, zeit-pro-interline.pdf
 
 Erklärung:
+In dem Diagramm "zeit-pro-interline" kann man gut sehen, das einen Bereich gibt, wo die Zeit
+pro Interline sich verringert, danach aber wieder steigt. Das kann dadurch zustande kommen, 
+das erst ab dem Minimum (~4 Interlines), der Aufwand der Verwaltung der Datenaufteilung
+kleiner wird als die eigentliche Rechenzeit pro Interline. Die Rechenzeit sollte in einem
+sequentiellen Programm quadratisch mit den Interlines wachsen, da die Interlines die Größe
+der Matrix bestimmen, über die in zwei verschachtelten Schleifen iteriert wird, folglich
+quadratisch. Dieses Wachstum äußert sich durch die Parallelisierung mit mehr Interlines
+eher in einer linearen Rate, was man an den Diagramm "interline-linear-scale.pdf" gut sehen
+kann. 
