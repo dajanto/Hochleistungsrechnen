@@ -31,8 +31,6 @@ struct calculation_arguments
 	double  ***Matrix;      /* index matrix used for addressing M             */
 	double  *M;             /* two matrices with real values                  */
 	double  h;              /* length of a space between two lines            */
-	double  h_square_two_pi_square; /* product of square of h and TWO_PI_SQUARE */
-	double  PIh;            /* product of pi and h                            */
 };
 
 struct calculation_results
@@ -61,8 +59,6 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
 	arguments->N = options->interlines * 8 + 9 - 1;
 	arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
 	arguments->h = (float)( ( (float)(1) ) / (arguments->N));
-	arguments->h_square_two_pi_square = arguments->h * arguments->h * TWO_PI_SQUARE;
-	arguments-> PIh = arguments-> h * PI;
 
 	results->m = 0;
 	results->stat_iteration = 0;
@@ -179,49 +175,42 @@ initMatrices (struct calculation_arguments* arguments, struct options* options)
 	}
 }
 
-/* ************************************************************************ */
-/* getResiduum: calculates residuum                                         */
-/* Input: x,y - actual column and row                                       */
-/* ************************************************************************ */
-double
-getResiduum (struct calculation_arguments* arguments, struct options* options, double x, int y, double star)
-{
-	if (options->inf_func == FUNC_F0)
+static double** generateCache(struct calculation_arguments* arguments){
+	int i, j;
+
+	int N = arguments->N;
+
+	double  **Matrix = allocateMemory((N + 1) * sizeof(double*));
+
+	for (i = 0; i <= N; i++)
 	{
-		return ((-star) / 4.0);
+		Matrix[i] = allocateMemory((N + 1) * sizeof(double*));
 	}
-	else
+
+	/* initialize matrix/matrices with zeros */
+	double Pih = arguments->h * PI;
+	double h_square_two_pi_square = arguments->h * arguments->h * TWO_PI_SQUARE * 0.25;
+	
+	for (i = 0; i <= N; i++)
 	{
-		return ((sin((double)(y) * arguments->PIh) * sin(x * arguments->PIh) * arguments->h_square_two_pi_square - star) / 4.0);
+		double di = (double) i;
+
+		for (j = 0; j <= N; j++)
+		{
+			Matrix[i][j] = sin((double)(j) * Pih) * sin(di * Pih) * h_square_two_pi_square;
+		}
 	}
+	return Matrix;
 }
 
-/* ************************************************************************ */
-/* calculate: solves the equation                                           */
-/* ************************************************************************ */
-static
-void
-calculate (struct calculation_arguments* arguments, struct calculation_results *results, struct options* options)
+static int calcNoNoise(int m1, int m2, struct calculation_arguments* arguments, struct calculation_results *results, struct options* options)
 {
 	int i, j;                                   /* local variables for loops  */
-	int m1, m2;                                 /* used as indices for old and new matrices       */
-	double star;                                /* four times center value minus 4 neigh.b values */
-	double korrektur;
 	double residuum;                            /* residuum of current iteration                  */
 	double maxresiduum;                         /* maximum residuum value of a slave in iteration */
 
 	int N = arguments->N;
 	double*** Matrix = arguments->Matrix;
-
-	/* initialize m1 and m2 depending on algorithm */
-	if (options->method == METH_GAUSS_SEIDEL)
-	{
-		m1=0; m2=0;
-	}
-	else
-	{
-		m1=0; m2=1;
-	}
 
 	while (options->term_iteration > 0)
 	{
@@ -229,18 +218,15 @@ calculate (struct calculation_arguments* arguments, struct calculation_results *
 		/* over all columns */
 		for (i = 1; i < N; i++)
 		{
-			double di = (double) i;
 			/* over all rows */
 			for (j = 1; j < N; j++)
 			{
-				star = -Matrix[m2][i-1][j] - Matrix[m2][i][j-1] - Matrix[m2][i][j+1] - Matrix[m2][i+1][j] + 4.0 * Matrix[m2][i][j];
+				residuum = 0.25 * (Matrix[m2][i-1][j] + Matrix[m2][i][j-1] + Matrix[m2][i][j+1] + Matrix[m2][i+1][j] - 4.0 * Matrix[m2][i][j]);
 
-				residuum = getResiduum(arguments, options, di, j, star);
-				korrektur = residuum;
 				residuum = (residuum < 0) ? -residuum : residuum;
 				maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
 
-				Matrix[m1][i][j] = Matrix[m2][i][j] + korrektur;
+				Matrix[m1][i][j] = Matrix[m2][i][j] + residuum;
 			}
 		}
 
@@ -263,6 +249,91 @@ calculate (struct calculation_arguments* arguments, struct calculation_results *
 			options->term_iteration--;
 		}
 	}
+	
+	return m2;
+}
+
+
+static int calcNoise(int m1, int m2, struct calculation_arguments* arguments, struct calculation_results *results, struct options* options, double **cache)
+{
+	int i, j;                                   /* local variables for loops  */
+	double residuum;                            /* residuum of current iteration                  */
+	double maxresiduum;                         /* maximum residuum value of a slave in iteration */
+
+	int N = arguments->N;
+	double*** Matrix = arguments->Matrix;
+
+	while (options->term_iteration > 0)
+	{
+		maxresiduum = 0;
+		/* over all columns */
+		for (i = 1; i < N; i++)
+		{
+			/* over all rows */
+			for (j = 1; j < N; j++)
+			{
+				residuum = 0.25 * (Matrix[m2][i-1][j] + Matrix[m2][i][j-1] + Matrix[m2][i][j+1] + Matrix[m2][i+1][j] - 4.0 * Matrix[m2][i][j]);
+				
+				residuum = cache[i][j] + residuum;
+				residuum = (residuum < 0) ? -residuum : residuum;
+				maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
+
+				Matrix[m1][i][j] = Matrix[m2][i][j] + residuum;
+			}
+		}
+
+		results->stat_iteration++;
+		results->stat_precision = maxresiduum;
+
+		/* exchange m1 and m2 */
+		i=m1; m1=m2; m2=i;
+
+		/* check for stopping calculation, depending on termination method */
+		if (options->termination == TERM_PREC)
+		{
+			if (maxresiduum < options->term_precision)
+			{
+				options->term_iteration = 0;
+			}
+		}
+		else if (options->termination == TERM_ITER)
+		{
+			options->term_iteration--;
+		}
+	}
+	
+	return m2;
+}
+
+/* ************************************************************************ */
+/* calculate: solves the equation                                           */
+/* ************************************************************************ */
+static
+void
+calculate (struct calculation_arguments* arguments, struct calculation_results *results, struct options* options)
+{
+	int m1, m2;                                 /* used as indices for old and new matrices       */
+
+	/* initialize m1 and m2 depending on algorithm */
+	if (options->method == METH_GAUSS_SEIDEL)
+	{
+		m1=0; m2=0;
+	}
+	else
+	{
+		m1=0; m2=1;
+	}
+
+	double **cache = generateCache(arguments);
+	if (options->inf_func == FUNC_F0)
+	{
+		m2 = calcNoNoise(m1, m2, arguments, results, options);
+	}
+	else
+	{
+		m2 = calcNoise(m1, m2, arguments, results, options, cache);
+	}
+	
 
 	results->m = m2;
 }
