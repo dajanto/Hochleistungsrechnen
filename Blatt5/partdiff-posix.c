@@ -198,13 +198,13 @@ static void* calculateRows(void* void_argument)
 
 	double pih = argument->pih;
 	double fpisin = argument->fpisin;
-	double **Matrix_In = argument->Matrix_In; 
-	double **Matrix_Out = argument->Matrix_Out; 
+	double **Matrix_In = argument->Matrix_In;
+	double **Matrix_Out = argument->Matrix_Out;
 	int start = argument->start;
 	int end = argument->end;
 	int N = argument->N;
-	double *maxresiduum_cache = argument->maxresiduum_cache; 
-	int cache_index = argument->cache_index; 
+	double *maxresiduum_cache = argument->maxresiduum_cache;
+	int cache_index = argument->cache_index;
 	int term_iteration = argument->term_iteration;
 	struct options const* options = argument->options;
 
@@ -300,7 +300,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
 	int chunkSize = N / num_threads;
 
-	printf("Total: %d, ChunkSize: %d\n", N, chunkSize);
 	for (i = 0; i < num_threads; i++)
 	{
 		struct work_arguments *work_argument = &args[i];
@@ -320,8 +319,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		work_argument->pih = pih;
 		work_argument->options = options;
 		work_argument->N = N;
-		
-		printf("Thread %3d, %5d-%5d\n",i, start, end);
 	}
 	
 
