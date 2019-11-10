@@ -194,9 +194,8 @@ struct work_arguments
 
 static void* calculateRows(void* void_argument)
 {
-	printf("Arguments Pointer:%p\n", void_argument);
 	struct work_arguments const* argument = (struct work_arguments const*) void_argument;
-	printf("Arguments Pointer after cast:%p\n", argument);
+
 	double pih = argument->pih;
 	double fpisin = argument->fpisin;
 	double **Matrix_In = argument->Matrix_In; 
@@ -304,24 +303,25 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 	printf("Total: %d, ChunkSize: %d\n", N, chunkSize);
 	for (i = 0; i < num_threads; i++)
 	{
-		struct work_arguments work_argument = args[i];
-		printf("work argument: %p\n", &work_argument);
-		int start = chunkSize * i;
-		int end = start + chunkSize;
+		struct work_arguments *work_argument = &args[i];
+		int start = (chunkSize * i) + 1;
+		int end = start - 1 + chunkSize;
 		
 		if ((i+1) >= num_threads)
 		{
 			end = N;
 		}
+
+		work_argument->start = start;
+		work_argument->end = end;
+		work_argument->cache_index = i;
+		work_argument->fpisin = fpisin;
+		work_argument->maxresiduum_cache = maxresiduum_cache;
+		work_argument->pih = pih;
+		work_argument->options = options;
+		work_argument->N = N;
+		
 		printf("Thread %3d, %5d-%5d\n",i, start, end);
-		work_argument.start = start;
-		work_argument.end = end;
-		work_argument.cache_index = i;
-		work_argument.fpisin = fpisin;
-		work_argument.maxresiduum_cache = maxresiduum_cache;
-		work_argument.pih = pih;
-		work_argument.options = options;
-		work_argument.N = N;
 	}
 	
 
@@ -332,12 +332,12 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		
 		for (i = 0; i < num_threads; i++)
 		{
-			struct work_arguments argument = args[i];
-			argument.Matrix_In = Matrix_In;
-			argument.Matrix_Out = Matrix_Out;
+			struct work_arguments *argument = &args[i];
+			argument->Matrix_In = Matrix_In;
+			argument->Matrix_Out = Matrix_Out;
 
 			pthread_t *id = &thread_ids[i];
-			if(pthread_create(id, NULL, calculateRows, &argument))
+			if(pthread_create(id, NULL, calculateRows, argument))
 			{
 				fprintf(stderr, "Error creating thread\n");
 				exit(1);
