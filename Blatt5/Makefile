@@ -6,14 +6,20 @@ CFLAGS = -std=c11 -pedantic -Wall -Wextra -O3 -ggdb
 LFLAGS = $(CFLAGS)
 LIBS   = -lm
 
-TGTS = partdiff
+TGTS = partdiff partdiff-posix
 OBJS = partdiff.o askparams.o
+P_OBJS = partdiff-posix.o askparams.o
 
 # Targets ...
-all: partdiff
+all: $(TGTS)
 
 partdiff: $(OBJS) Makefile
 	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
+
+partdiff-posix: $(P_OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(P_OBJS) $(LIBS)
+
+partdiff-posix.o: partdiff-posix.c Makefile
 
 partdiff.o: partdiff.c Makefile
 
