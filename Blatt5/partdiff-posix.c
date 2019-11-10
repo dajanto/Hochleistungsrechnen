@@ -19,6 +19,7 @@
 /* ************************************************************************ */
 #define _POSIX_C_SOURCE 200809L
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -176,6 +177,75 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
 	}
 }
 
+struct work_arguments 
+{
+	double **Matrix_In;
+	double **Matrix_Out; 
+	int start;
+	int end;
+	int N;
+	double *maxresiduum_cache;
+	int cache_index;
+	double fpisin;
+	double pih;
+	int term_iteration;
+	struct options const* options;
+};
+
+static void* calculateRows(void* void_argument)
+{
+	printf("Arguments Pointer:%p\n", void_argument);
+	struct work_arguments const* argument = (struct work_arguments const*) void_argument;
+	printf("Arguments Pointer after cast:%p\n", argument);
+	double pih = argument->pih;
+	double fpisin = argument->fpisin;
+	double **Matrix_In = argument->Matrix_In; 
+	double **Matrix_Out = argument->Matrix_Out; 
+	int start = argument->start;
+	int end = argument->end;
+	int N = argument->N;
+	double *maxresiduum_cache = argument->maxresiduum_cache; 
+	int cache_index = argument->cache_index; 
+	int term_iteration = argument->term_iteration;
+	struct options const* options = argument->options;
+
+	int i,j;
+	double residuum, star;
+	double maxresiduum = 0;
+
+	for (i = start; i < end; i++)
+	{
+		double fpisin_i = 0.0;
+
+		if (options->inf_func == FUNC_FPISIN)
+		{
+			fpisin_i = fpisin * sin(pih * (double)i);
+		}
+
+		/* over all columns */
+		for (j = 1; j < N; j++)
+		{
+			star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
+
+			if (options->inf_func == FUNC_FPISIN)
+			{
+				star += fpisin_i * sin(pih * (double)j);
+			}
+
+			if (options->termination == TERM_PREC || term_iteration == 1)
+			{
+				residuum = Matrix_In[i][j] - star;
+				residuum = (residuum < 0) ? -residuum : residuum;
+				maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
+			}
+
+			Matrix_Out[i][j] = star;
+		}
+	}
+	maxresiduum_cache[cache_index] = maxresiduum;
+	return 0;
+}
+
 /* ************************************************************************ */
 /* calculate: solves the equation                                           */
 /* ************************************************************************ */
@@ -183,10 +253,8 @@ static
 void
 calculate (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
 {
-	int i, j;                                   /* local variables for loops */
+	int i;                                      /* local variables for loops */
 	int m1, m2;                                 /* used as indices for old and new matrices */
-	double star;                                /* four times center value minus 4 neigh.b values */
-	double residuum;                            /* residuum of current iteration */
 	double maxresiduum;                         /* maximum residuum value of a slave in iteration */
 
 	int const N = arguments->N;
@@ -196,6 +264,12 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 	double fpisin = 0.0;
 
 	int term_iteration = options->term_iteration;
+	int num_threads = options->number;
+
+	if (num_threads <= 0)
+	{
+		num_threads = 1;
+	}
 
 	/* initialize m1 and m2 depending on algorithm */
 	if (options->method == METH_JACOBI)
@@ -215,41 +289,81 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		fpisin = 0.25 * TWO_PI_SQUARE * h * h;
 	}
 
+	double *maxresiduum_cache = allocateMemory(num_threads * sizeof(double));
+
+	for (i = 0; i < num_threads; i++)
+	{
+		maxresiduum_cache[i] = 0;
+	}
+
+	struct work_arguments *args = allocateMemory(num_threads * sizeof(struct work_arguments));
+	pthread_t *thread_ids = allocateMemory(num_threads * sizeof(pthread_t)); 
+
+	int chunkSize = N / num_threads;
+
+	printf("Total: %d, ChunkSize: %d\n", N, chunkSize);
+	for (i = 0; i < num_threads; i++)
+	{
+		struct work_arguments work_argument = args[i];
+		printf("work argument: %p\n", &work_argument);
+		int start = chunkSize * i;
+		int end = start + chunkSize;
+		
+		if ((i+1) >= num_threads)
+		{
+			end = N;
+		}
+		printf("Thread %3d, %5d-%5d\n",i, start, end);
+		work_argument.start = start;
+		work_argument.end = end;
+		work_argument.cache_index = i;
+		work_argument.fpisin = fpisin;
+		work_argument.maxresiduum_cache = maxresiduum_cache;
+		work_argument.pih = pih;
+		work_argument.options = options;
+		work_argument.N = N;
+	}
+	
+
 	while (term_iteration > 0)
 	{
 		double** Matrix_Out = arguments->Matrix[m1];
 		double** Matrix_In  = arguments->Matrix[m2];
+		
+		for (i = 0; i < num_threads; i++)
+		{
+			struct work_arguments argument = args[i];
+			argument.Matrix_In = Matrix_In;
+			argument.Matrix_Out = Matrix_Out;
+
+			pthread_t *id = &thread_ids[i];
+			if(pthread_create(id, NULL, calculateRows, &argument))
+			{
+				fprintf(stderr, "Error creating thread\n");
+				exit(1);
+			}
+		}
+
+		for (i = 0; i < num_threads; i++)
+		{
+			pthread_t id = thread_ids[i];
+		
+			if(pthread_join(id, NULL))
+			{
+				fprintf(stderr, "Error joining thread\n");
+				exit(2);
+			}
+		}
 
 		maxresiduum = 0;
 
-		/* over all rows */
-		for (i = 1; i < N; i++)
+		if (options->termination == TERM_PREC || term_iteration == 1)
 		{
-			double fpisin_i = 0.0;
-
-			if (options->inf_func == FUNC_FPISIN)
+			for (i = 0; i < num_threads; i++)
 			{
-				fpisin_i = fpisin * sin(pih * (double)i);
-			}
-
-			/* over all columns */
-			for (j = 1; j < N; j++)
-			{
-				star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
-
-				if (options->inf_func == FUNC_FPISIN)
-				{
-					star += fpisin_i * sin(pih * (double)j);
-				}
-
-				if (options->termination == TERM_PREC || term_iteration == 1)
-				{
-					residuum = Matrix_In[i][j] - star;
-					residuum = (residuum < 0) ? -residuum : residuum;
-					maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
-				}
-
-				Matrix_Out[i][j] = star;
+				double thread_max = maxresiduum_cache[i];
+				maxresiduum = (thread_max < maxresiduum) ? maxresiduum : thread_max;
+				maxresiduum_cache[i] = 0;
 			}
 		}
 
@@ -274,6 +388,10 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 			term_iteration--;
 		}
 	}
+
+	free(thread_ids);
+	free(args);
+	free(maxresiduum_cache);
 
 	results->m = m2;
 }
