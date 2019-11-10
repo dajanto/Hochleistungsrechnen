@@ -332,6 +332,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 			struct work_arguments *argument = &args[i];
 			argument->Matrix_In = Matrix_In;
 			argument->Matrix_Out = Matrix_Out;
+			argument->term_iteration = term_iteration;
 
 			pthread_t *id = &thread_ids[i];
 			if(pthread_create(id, NULL, calculateRows, argument))
