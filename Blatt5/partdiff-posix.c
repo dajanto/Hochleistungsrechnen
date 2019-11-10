@@ -305,7 +305,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 	{
 		struct work_arguments *work_argument = &args[i];
 		int start = (chunkSize * i) + 1;
-		int end = start - 1 + chunkSize;
+		int end = start + chunkSize;
 		
 		if ((i+1) >= num_threads)
 		{
