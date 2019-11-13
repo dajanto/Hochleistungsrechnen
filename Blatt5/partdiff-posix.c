@@ -218,12 +218,10 @@ static void* calculateRows(void* void_argument)
 	
 	while (1)
 	{
-		// printf("locking on sub thread %d\n", cache_index);
 		pthread_mutex_lock(mutex);
 		
 		while(argument->sub_wait)
 		{
-			// printf("waiting on sub thread %d\n", cache_index);
 			pthread_cond_wait(cond, mutex);
 		}
 
@@ -233,9 +231,6 @@ static void* calculateRows(void* void_argument)
 		{
 			break;
 		}
-		
-		// printf("calculating on sub thread %d\n", cache_index);
-
 		argument->sub_wait=1;
 
 		double **Matrix_In = argument->Matrix_In;
@@ -276,17 +271,14 @@ static void* calculateRows(void* void_argument)
 		maxresiduum_cache[cache_index] = maxresiduum;
 
 
-		// printf("right before signaling on sub thread %d\n", cache_index);
 		argument->main_wait = 0;
 		pthread_cond_signal(cond);
 		pthread_mutex_unlock(mutex);
-		// printf("signaling on sub thread %d\n", cache_index);
 	}
 
 	argument->main_wait = 0;
 	pthread_cond_signal(cond);
 	pthread_mutex_unlock(mutex);
-	printf("Finished Thread %d\n", cache_index);
 	return 0;
 }
 
@@ -344,8 +336,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 	pthread_t *thread_ids = allocateMemory(num_threads * sizeof(pthread_t)); 
 
 	int chunkSize = N / num_threads;
-
-	printf("hello on main thread\n");
 	
 	for (i = 0; i < num_threads; i++)
 	{
@@ -375,10 +365,8 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
 		pthread_mutex_init(mutex, NULL);
 		pthread_cond_init(cond, NULL);
-		printf("initial locking on main thread for %d\n", i);
 		pthread_mutex_lock(mutex);
 
-		printf("creating sub thread %d\n", i);
 		if(pthread_create(&work_argument->thread_id, NULL, calculateRows, work_argument))
 		{
 			fprintf(stderr, "Error creating thread %d\n", i);
@@ -389,8 +377,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
 	while (term_iteration > 0)
 	{
-		printf("Iterations left: %d -------------------------------\n", term_iteration);
-
 		double** Matrix_Out = arguments->Matrix[m1];
 		double** Matrix_In  = arguments->Matrix[m2];
 		
@@ -401,7 +387,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 			argument->Matrix_Out = Matrix_Out;
 			argument->term_iteration = term_iteration;
 
-			printf("unlocking on main thread for %d\n", i);
 			argument->sub_wait = 0;
 			argument->main_wait = 1;
 
@@ -413,16 +398,12 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		{
 			struct work_arguments *argument = &args[i];
 			
-			printf("locking for waiting on main thread for %d\n", i);
 			pthread_mutex_lock(&argument->mutex);
 
 			while (argument->main_wait)
 			{
-				printf("before waiting got lock for mutex of thread %d\n", i);
 				pthread_cond_wait(&argument->cond, &argument->mutex);
-				printf("after waiting got lock for mutex of thread %d\n", i);
 			}
-			printf("got finished signal for thread %d\n", i);
 		}
 
 		maxresiduum = 0;
@@ -459,18 +440,21 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		}
 	}
 
-	printf("Finished on main-------------------------\n");
 	for (i = 0; i < num_threads; i++)
 	{
 		struct work_arguments *argument = &args[i];
 		argument->sub_wait = 0;
 		argument->term_iteration = 0;
+
 		pthread_cond_signal(&argument->cond);
 		pthread_mutex_unlock(&argument->mutex);
+		
 		pthread_join(argument->thread_id, NULL);
+		
 		pthread_mutex_destroy(&argument->mutex);
 		pthread_cond_destroy(&argument->cond);
 	}
+
 	free(thread_ids);
 	free(args);
 	free(maxresiduum_cache);
