@@ -190,58 +190,103 @@ struct work_arguments
 	double pih;
 	int term_iteration;
 	struct options const* options;
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	pthread_t thread_id;
+	int sub_wait;
+	int main_wait;
 };
 
 static void* calculateRows(void* void_argument)
 {
-	struct work_arguments const* argument = (struct work_arguments const*) void_argument;
+	struct work_arguments *argument = (struct work_arguments*) void_argument;
 
 	double pih = argument->pih;
 	double fpisin = argument->fpisin;
-	double **Matrix_In = argument->Matrix_In;
-	double **Matrix_Out = argument->Matrix_Out;
 	int start = argument->start;
 	int end = argument->end;
 	int N = argument->N;
 	double *maxresiduum_cache = argument->maxresiduum_cache;
 	int cache_index = argument->cache_index;
-	int term_iteration = argument->term_iteration;
 	struct options const* options = argument->options;
+	pthread_mutex_t *mutex = &argument->mutex;
+	pthread_cond_t *cond = &argument->cond;
 
+	int term_iteration;
 	int i,j;
 	double residuum, star;
-	double maxresiduum = 0;
-
-	for (i = start; i < end; i++)
+	
+	while (1)
 	{
-		double fpisin_i = 0.0;
-
-		if (options->inf_func == FUNC_FPISIN)
+		// printf("locking on sub thread %d\n", cache_index);
+		pthread_mutex_lock(mutex);
+		
+		while(argument->sub_wait)
 		{
-			fpisin_i = fpisin * sin(pih * (double)i);
+			// printf("waiting on sub thread %d\n", cache_index);
+			pthread_cond_wait(cond, mutex);
 		}
 
-		/* over all columns */
-		for (j = 1; j < N; j++)
+		term_iteration = argument->term_iteration;
+
+		if (term_iteration <= 0)
 		{
-			star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
+			break;
+		}
+		
+		// printf("calculating on sub thread %d\n", cache_index);
+
+		argument->sub_wait=1;
+
+		double **Matrix_In = argument->Matrix_In;
+		double **Matrix_Out = argument->Matrix_Out;
+
+		double maxresiduum = 0;
+	
+		/* over rows inclusive 'start' to exclusive 'end' */
+		for (i = start; i < end; i++)
+		{
+			double fpisin_i = 0.0;
 
 			if (options->inf_func == FUNC_FPISIN)
 			{
-				star += fpisin_i * sin(pih * (double)j);
+				fpisin_i = fpisin * sin(pih * (double)i);
 			}
 
-			if (options->termination == TERM_PREC || term_iteration == 1)
+			/* over all columns */
+			for (j = 1; j < N; j++)
 			{
-				residuum = Matrix_In[i][j] - star;
-				residuum = (residuum < 0) ? -residuum : residuum;
-				maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
-			}
+				star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
 
-			Matrix_Out[i][j] = star;
+				if (options->inf_func == FUNC_FPISIN)
+				{
+					star += fpisin_i * sin(pih * (double)j);
+				}
+
+				if (options->termination == TERM_PREC || term_iteration == 1)
+				{
+					residuum = Matrix_In[i][j] - star;
+					residuum = (residuum < 0) ? -residuum : residuum;
+					maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
+				}
+
+				Matrix_Out[i][j] = star;
+			}
 		}
+		maxresiduum_cache[cache_index] = maxresiduum;
+
+
+		// printf("right before signaling on sub thread %d\n", cache_index);
+		argument->main_wait = 0;
+		pthread_cond_signal(cond);
+		pthread_mutex_unlock(mutex);
+		// printf("signaling on sub thread %d\n", cache_index);
 	}
-	maxresiduum_cache[cache_index] = maxresiduum;
+
+	argument->main_wait = 0;
+	pthread_cond_signal(cond);
+	pthread_mutex_unlock(mutex);
+	printf("Finished Thread %d\n", cache_index);
 	return 0;
 }
 
@@ -300,6 +345,8 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
 	int chunkSize = N / num_threads;
 
+	printf("hello on main thread\n");
+	
 	for (i = 0; i < num_threads; i++)
 	{
 		struct work_arguments *work_argument = &args[i];
@@ -319,11 +366,31 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		work_argument->pih = pih;
 		work_argument->options = options;
 		work_argument->N = N;
+		work_argument->sub_wait = 1;
+		work_argument->main_wait = 1;
+		work_argument->term_iteration = term_iteration;
+		
+		pthread_mutex_t *mutex = &work_argument->mutex;
+		pthread_cond_t *cond = &work_argument->cond;
+
+		pthread_mutex_init(mutex, NULL);
+		pthread_cond_init(cond, NULL);
+		printf("initial locking on main thread for %d\n", i);
+		pthread_mutex_lock(mutex);
+
+		printf("creating sub thread %d\n", i);
+		if(pthread_create(&work_argument->thread_id, NULL, calculateRows, work_argument))
+		{
+			fprintf(stderr, "Error creating thread %d\n", i);
+			exit(1);
+		}
 	}
 	
 
 	while (term_iteration > 0)
 	{
+		printf("Iterations left: %d -------------------------------\n", term_iteration);
+
 		double** Matrix_Out = arguments->Matrix[m1];
 		double** Matrix_In  = arguments->Matrix[m2];
 		
@@ -334,23 +401,28 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 			argument->Matrix_Out = Matrix_Out;
 			argument->term_iteration = term_iteration;
 
-			pthread_t *id = &thread_ids[i];
-			if(pthread_create(id, NULL, calculateRows, argument))
-			{
-				fprintf(stderr, "Error creating thread\n");
-				exit(1);
-			}
+			printf("unlocking on main thread for %d\n", i);
+			argument->sub_wait = 0;
+			argument->main_wait = 1;
+
+			pthread_cond_signal(&argument->cond);
+			pthread_mutex_unlock(&argument->mutex);
 		}
 
 		for (i = 0; i < num_threads; i++)
 		{
-			pthread_t id = thread_ids[i];
-		
-			if(pthread_join(id, NULL))
+			struct work_arguments *argument = &args[i];
+			
+			printf("locking for waiting on main thread for %d\n", i);
+			pthread_mutex_lock(&argument->mutex);
+
+			while (argument->main_wait)
 			{
-				fprintf(stderr, "Error joining thread\n");
-				exit(2);
+				printf("before waiting got lock for mutex of thread %d\n", i);
+				pthread_cond_wait(&argument->cond, &argument->mutex);
+				printf("after waiting got lock for mutex of thread %d\n", i);
 			}
+			printf("got finished signal for thread %d\n", i);
 		}
 
 		maxresiduum = 0;
@@ -387,6 +459,18 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 		}
 	}
 
+	printf("Finished on main-------------------------\n");
+	for (i = 0; i < num_threads; i++)
+	{
+		struct work_arguments *argument = &args[i];
+		argument->sub_wait = 0;
+		argument->term_iteration = 0;
+		pthread_cond_signal(&argument->cond);
+		pthread_mutex_unlock(&argument->mutex);
+		pthread_join(argument->thread_id, NULL);
+		pthread_mutex_destroy(&argument->mutex);
+		pthread_cond_destroy(&argument->cond);
+	}
 	free(thread_ids);
 	free(args);
 	free(maxresiduum_cache);
