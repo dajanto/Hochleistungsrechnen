@@ -1,0 +1,19 @@
+1h 15 min:
+- Erstes Refaktoring von partdiff zur Parallelisierung mit pthreads
+25 min:
+- Algorithmus zur Arbeitsteilung entwerfen
+25 min:
+- Hat nicht funktioniert, da auf die work_arguments structs
+  falsch zugegriffen wurde (es wurde eine Kopie erstellt bei der
+  Zuweisung, weswegen die Objekte im Array nicht verändert wurden)
+25 min:
+- Falsche Ausgabe debuggen
+45 min:
+- Falsche Ausgabe korrigieren
+- Inkorrekten Maxresiduum korrigieren
+
+3h weitere Stunden für posix-keepalive:
+- Zufällige Deadlocks durch inkorrekte Benutzung von Mutex 
+  und Bedingungsvariablen
+- Keine Terminierung der Arbeiter Threads durch inkorrekte 
+  Zuweisung der Terminierungsvariablen
