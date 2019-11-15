@@ -177,30 +177,42 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
     }
 }
 
+/*
+    Argument Struct for Worker Threads.
+    Its values will possible change
+    while a worker thread has access to
+    an instance.
+ */
 struct work_arguments 
 {
-    double **Matrix_In;
-    double **Matrix_Out; 
-    int start;
-    int end;
-    int N;
-    double *maxresiduum_cache;
-    int cache_index;
-    double fpisin;
-    double pih;
-    int term_iteration;
-    struct options const* options;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    pthread_t thread_id;
-    int sub_wait;
-    int main_wait;
+    double **Matrix_In;            /* Input Matrix                                                            */
+    double **Matrix_Out;           /* Output Matrix                                                           */
+    int start;                     /* Start Index for rows                                                    */
+    int end;                       /* End Index for rows                                                      */
+    int N;                         /* number of spaces between lines (lines=N+1)                              */
+    double *maxresiduum_cache;     /* Array for maxresiduum results, will be read after each Iteration        */
+    int cache_index;               /* The unique index for the worker in max_residuum_cache                   */
+    double fpisin;                 /* Precalculated Value: '0.25 * TWO_PI_SQUARE * h * h' or zero             */
+    double pih;                    /* Precalculated Value: 'PI * h' or zero                                   */
+    int term_iteration;            /* Current Iteration                                                       */
+    struct options const* options; /* Options for this Run                                                    */
+    pthread_mutex_t mutex;         /* Mutex for the worker to synchronize the execution with main thread      */
+    pthread_cond_t cond;           /* Conditional Variable to signal the execution of worker and main thread  */
+    pthread_t thread_id;           /* ThreadId of the Worker thread                                           */
+    int sub_wait;                  /* Variable for signaling if the worker thread should wait, either 0 or 1  */
+    int main_wait;                 /* Variable for signaling if if the main thread should wait, either 0 or 1 */
 };
 
+/*
+    Function which will be called on Worker Thread.
+    Needs to have a single Parameter with void* as type and
+    needs to return a void Pointer, commonly 0.
+ */
 static void* calculateRows(void* void_argument)
 {
     struct work_arguments *argument = (struct work_arguments*) void_argument;
 
+    /* Extract most variables of work_arguments for faster/better access */
     double pih = argument->pih;
     double fpisin = argument->fpisin;
     int start = argument->start;
@@ -215,30 +227,78 @@ static void* calculateRows(void* void_argument)
     int term_iteration;
     int i,j;
     double residuum, star;
-    
+
+    /*
+        loop forever, as it should not check for term_iteration
+        at this point, else it could lead to race conditions
+     */
     while (1)
     {
+        /*
+            always lock before calling pthread_cond_wait
+            as it may not block instead if not locked
+            by this thread.
+        */
         pthread_mutex_lock(mutex);
-        
+
+        /*
+            Use a while instead of if in case the thread is scheduled weirdly which
+            could cause weird effects (recommendation of pthread documentation).
+            signal variable for sub thread to wait.
+            Only the main thread should change this value to zero
+         */
         while(argument->sub_wait)
         {
+            /*
+                wait for signal from main thread for cond on mutex,
+                waiting/sleeping releases the previously held lock and locks
+                instantly (atomic) the moment it receives a signal
+                via cond
+            */
             pthread_cond_wait(cond, mutex);
         }
 
+        /*
+            always update term_iteration AFTER awakening to prevent
+            race conditions, as the main thread does not manipulate
+            this values when it does not hold the mutex lock.
+         */
         term_iteration = argument->term_iteration;
 
+        /*
+            check after each awakening if the termination condition
+            for worker (and main thread) is reached, so it can
+            terminate successfully and be cleaned up
+         */
         if (term_iteration <= 0)
         {
             break;
         }
+        /*
+            set sub_wait to 1 in worker thread, as main thread
+            cannot (should not) set this value while the worker
+            calculates, as it could possibly lead to race conditions
+            on main thread writing to sub_wait and worker thread reading
+            on sub_wait
+         */
         argument->sub_wait=1;
 
+        /* get the current values of Matrix_In and Matrix_Out */
         double **Matrix_In = argument->Matrix_In;
         double **Matrix_Out = argument->Matrix_Out;
 
         double maxresiduum = 0;
-    
-        /* over rows inclusive 'start' to exclusive 'end' */
+
+        /*
+            As no synchronization needs to be done between Main Thread and worker thread
+            this calculataion can be copied completely.
+            It does not need synchronization, as the only changed value is
+            an element of rows specific to this worker of Matrix_Out, 
+            which is not updated by any other thread.
+            Only the start value and end value for i needs to be replaced with
+            the 'start' and 'end' variable respectively, as it iterates not
+            over all rows, but only a portion of it.
+         */
         for (i = start; i < end; i++)
         {
             double fpisin_i = 0.0;
@@ -268,14 +328,39 @@ static void* calculateRows(void* void_argument)
                 Matrix_Out[i][j] = star;
             }
         }
+        /*
+            As this function should not return a value like maxresiduum with 'return'
+            it needs a output variable like maxresiduum_cache, where it is stored
+            and then read from the Main Thread.
+        */
         maxresiduum_cache[cache_index] = maxresiduum;
 
-
+        /*
+            set main_wait to 0 in worker thread, as main thread
+            cannot (should not be able to) set this value to zero, 
+            while the worker calculates, as it should wait on the
+            condition variable 'cond'.
+            After that this worker thread will signal the main thread
+            that it finished it's work with pthread_cond_signal.
+            After signaling the mutex, which this worker thread holds,
+            needs to be unlocked, so that the main thread can
+            awake from waiting and acquire the mutex
+         */
         argument->main_wait = 0;
         pthread_cond_signal(cond);
         pthread_mutex_unlock(mutex);
     }
 
+    /*
+        Nearly the same as at the end of the previous while
+        loop. Here it signals the main thread a last time, so
+        main thread is able to acquire the lock in any case:
+        while loop should only finish when term_iteration is
+        below or equal to zero, thus for the main thread to
+        destroy all resources (mutex, condition variables)
+        successfully, it needs to acquire the the mutex which
+        is held by worker thread after the while loop exits
+    */
     argument->main_wait = 0;
     pthread_cond_signal(cond);
     pthread_mutex_unlock(mutex);
@@ -325,29 +410,56 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         fpisin = 0.25 * TWO_PI_SQUARE * h * h;
     }
 
+    /* Array where the output of maxresiduum is stored after for each worker */
     double *maxresiduum_cache = allocateMemory(num_threads * sizeof(double));
 
+    /* initialize maxresiduum_cache entries to zero */
     for (i = 0; i < num_threads; i++)
     {
         maxresiduum_cache[i] = 0;
     }
 
+    /* allocate array for workarguments, where its values are stored in_place for faster access */
     struct work_arguments *args = allocateMemory(num_threads * sizeof(struct work_arguments));
+
+    /* allocate array for threadids with value stored in-place */
     pthread_t *thread_ids = allocateMemory(num_threads * sizeof(pthread_t)); 
 
     int chunkSize = N / num_threads;
     
+    /* 
+        create and initialize worker threads and their work_argument in this loop before 
+        the actual calculation loop and store their thread_ids for further thread control
+     */
     for (i = 0; i < num_threads; i++)
     {
+        /*
+            a struct pointer is needed to modify the values of its content,
+            else a copy is constructed and modified instead
+         */
         struct work_arguments *work_argument = &args[i];
+
+        /*
+            start variable is incremented, as it is done in the previous outer loop.
+            the calculation uses the elements adjacent to the current element
+            and thus it would access a value out of its bounds if it starts from zero.
+        */
         int start = (chunkSize * i) + 1;
         int end = start + chunkSize;
-        
+
+        /*
+            necessary check to prevent accessing out of the bounds of the Matrix,
+            as the last work_chunk goes to N + 1 instead of N 
+            as start is incremented by one.
+            This also means that the worker for the last chunk in the current iteration 
+            always gets one row less than the others
+         */
         if ((i+1) >= num_threads)
         {
             end = N;
         }
 
+        /* initialize work_argument values */
         work_argument->start = start;
         work_argument->end = end;
         work_argument->cache_index = i;
@@ -359,14 +471,29 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         work_argument->sub_wait = 1;
         work_argument->main_wait = 1;
         work_argument->term_iteration = term_iteration;
-        
+
+        /*
+            Mutexes and conditional variables are part of the workargument instead of a
+            pointer for faster access.
+            Each worker thread gets a mutex, so that they don't exclude each other from
+            working. The main thread is responsible for synchronizing the work on each
+            worker. Each worker receive a conditional variable for signaling the start
+            and end of each work cycle of the worker.
+         */
         pthread_mutex_t *mutex = &work_argument->mutex;
         pthread_cond_t *cond = &work_argument->cond;
 
+        /* Initialize the mutex and conditional variable with default values */
         pthread_mutex_init(mutex, NULL);
         pthread_cond_init(cond, NULL);
+        /* acquire mutex on main thread before worker thread is created */
         pthread_mutex_lock(mutex);
 
+        /* 
+            create pthread worker with function calculate and its argument and store its id in thread_ids.
+            pthread_create can return a value different than zero to indicate a specific error type,
+            in our case, we just terminate the programm if we cant create a worker thread.
+        */
         if(pthread_create(&work_argument->thread_id, NULL, calculateRows, work_argument))
         {
             fprintf(stderr, "Error creating thread %d\n", i);
@@ -375,33 +502,66 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     }
     
 
+    /* the actual calculation loop */
     while (term_iteration > 0)
     {
         double** Matrix_Out = arguments->Matrix[m1];
         double** Matrix_In  = arguments->Matrix[m2];
-        
+
         for (i = 0; i < num_threads; i++)
         {
+            /*
+                these values needs to be updated before each work cycle
+                as they change possible each iteration
+             */
             struct work_arguments *argument = &args[i];
             argument->Matrix_In = Matrix_In;
             argument->Matrix_Out = Matrix_Out;
             argument->term_iteration = term_iteration;
 
+            /*
+                set sub_wait to zero before signaling worker thread
+                that it can continue execution.
+             */
             argument->sub_wait = 0;
+            /*
+                set main_wait to 1, which indicates that the main thread
+                shall wait till it is set to 0 from a worker thread
+             */
             argument->main_wait = 1;
 
             pthread_cond_signal(&argument->cond);
+            /*
+                For the worker thread
+                to actually execute again, the main thread needs to
+                release the ownership of the mutex for the worker.
+            */
             pthread_mutex_unlock(&argument->mutex);
         }
 
         for (i = 0; i < num_threads; i++)
         {
             struct work_arguments *argument = &args[i];
-            
+
+            /*
+                always lock before calling pthread_cond_wait
+                as it may not block instead if not locked
+                by this thread.
+            */
             pthread_mutex_lock(&argument->mutex);
 
+            /*
+                use a while instead of if in case the thread is scheduled weirdly which
+                could cause weird effects (recommendation of pthread documentation)
+             */
             while (argument->main_wait)
             {
+                /*
+                    wait for signal from worker thread for cond on mutex,
+                    waiting/sleeping releases the previously held lock and locks
+                    instantly (atomic) the moment it receives a signal
+                    via cond
+                */
                 pthread_cond_wait(&argument->cond, &argument->mutex);
             }
         }
@@ -410,6 +570,10 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
         if (options->termination == TERM_PREC || term_iteration == 1)
         {
+            /*
+                combine the results for maxresiduum of each worker.
+                it resembles "reduction(max, maxresiduum)" of openmp
+            */
             for (i = 0; i < num_threads; i++)
             {
                 double thread_max = maxresiduum_cache[i];
@@ -440,6 +604,10 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         }
     }
 
+    /*
+        Signal and wait for worker threads to terminate.
+        Cleanup the mutex and conditional variables.
+     */
     for (i = 0; i < num_threads; i++)
     {
         struct work_arguments *argument = &args[i];
@@ -455,6 +623,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         pthread_cond_destroy(&argument->cond);
     }
 
+    /* free previously in this function dynamically allocated memory */
     free(thread_ids);
     free(args);
     free(maxresiduum_cache);

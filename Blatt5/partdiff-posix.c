@@ -177,25 +177,36 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
     }
 }
 
-struct work_arguments 
+/*
+    Argument Struct for Worker Threads.
+    Its values should never change once
+    a worker holds it (no concurrent change possible).
+ */
+struct work_arguments
 {
-    double **Matrix_In;
-    double **Matrix_Out; 
-    int start;
-    int end;
-    int N;
-    double *maxresiduum_cache;
-    int cache_index;
-    double fpisin;
-    double pih;
-    int term_iteration;
-    struct options const* options;
+    double **Matrix_In;            /* Input Matrix                                                     */
+    double **Matrix_Out;           /* Output Matrix                                                    */
+    int start;                     /* Start Index for rows                                             */
+    int end;                       /* End Index for rows                                               */
+    int N;                         /* number of spaces between lines (lines=N+1)                       */
+    double *maxresiduum_cache;     /* Array for maxresiduum results, will be read after each Iteration */
+    int cache_index;               /* The unique index for the worker in max_residuum_cache           */
+    double fpisin;                 /* Precalculated Value: '0.25 * TWO_PI_SQUARE * h * h' or zero      */
+    double pih;                    /* Precalculated Value: 'PI * h' or zero                            */
+    int term_iteration;            /* Current Iteration                                                */
+    struct options const* options; /* Options for this Run                                             */
 };
 
+/*
+    Function which will be called on Worker Thread.
+    Needs to have a single Parameter with void* as type and
+    needs to return a void Pointer, commonly 0.
+ */
 static void* calculateRows(void* void_argument)
 {
     struct work_arguments const* argument = (struct work_arguments const*) void_argument;
 
+    /* Extract all variables of work_arguments for faster/better access */
     double pih = argument->pih;
     double fpisin = argument->fpisin;
     double **Matrix_In = argument->Matrix_In;
@@ -212,6 +223,16 @@ static void* calculateRows(void* void_argument)
     double residuum, star;
     double maxresiduum = 0;
 
+    /*
+        As no synchronization needs to be done between Main Thread and worker thread
+        this calculataion can be copied completely.
+        It does not need synchronization, as the only changed value is
+        an element of rows specific to this worker of Matrix_Out, 
+        which is not updated by any other thread.
+        Only the start value and end value for i needs to be replaced with
+        the 'start' and 'end' variable respectively, as it iterates not
+        over all rows, but only a portion of it.
+     */
     for (i = start; i < end; i++)
     {
         double fpisin_i = 0.0;
@@ -241,6 +262,11 @@ static void* calculateRows(void* void_argument)
             Matrix_Out[i][j] = star;
         }
     }
+    /*
+        As this function should not return a value like maxresiduum with 'return'
+        it needs a output variable like maxresiduum_cache, where it is stored
+        and then read from the Main Thread.
+    */
     maxresiduum_cache[cache_index] = maxresiduum;
     return 0;
 }
@@ -288,29 +314,52 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         fpisin = 0.25 * TWO_PI_SQUARE * h * h;
     }
 
+    /* Array where the output of maxresiduum is stored after for each worker */
     double *maxresiduum_cache = allocateMemory(num_threads * sizeof(double));
 
+    /* initialize maxresiduum_cache entries to zero */
     for (i = 0; i < num_threads; i++)
     {
         maxresiduum_cache[i] = 0;
     }
 
+    /* allocate array for workarguments, where its values are stored in_place for faster access */
     struct work_arguments *args = allocateMemory(num_threads * sizeof(struct work_arguments));
+    
+    /* allocate array for threadids with value stored in-place */
     pthread_t *thread_ids = allocateMemory(num_threads * sizeof(pthread_t)); 
 
     int chunkSize = N / num_threads;
 
     for (i = 0; i < num_threads; i++)
     {
+        /*
+            a struct pointer is needed to modify the values of its content,
+            else a copy is constructed and modified instead
+         */
         struct work_arguments *work_argument = &args[i];
+
+        /*
+            start variable is incremented, as it is done in the previous outer loop.
+            the calculation uses the elements adjacent to the current element
+            and thus it would access a value out of its bounds if it starts from zero.
+        */
         int start = (chunkSize * i) + 1;
         int end = start + chunkSize;
         
+        /*
+            necessary check to prevent accessing out of the bounds of the Matrix,
+            as the last work_chunk goes to N + 1 instead of N 
+            as start is incremented by one.
+            This also means that the worker for the last chunk in the current iteration 
+            always gets one row less than the others
+         */
         if ((i+1) >= num_threads)
         {
             end = N;
         }
 
+        /* initialize work_argument values */
         work_argument->start = start;
         work_argument->end = end;
         work_argument->cache_index = i;
@@ -330,11 +379,20 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         for (i = 0; i < num_threads; i++)
         {
             struct work_arguments *argument = &args[i];
+            /*
+                these values needs to be updated before each work cycle
+                as they change possible each iteration
+             */
             argument->Matrix_In = Matrix_In;
             argument->Matrix_Out = Matrix_Out;
             argument->term_iteration = term_iteration;
 
             pthread_t *id = &thread_ids[i];
+            /*
+                create pthread worker with function calculate and its argument and store its id in thread_ids.
+                pthread_create can return a value different than zero to indicate a specific error type,
+                in our case, we just terminate the programm if we cant create a worker thread.
+            */
             if(pthread_create(id, NULL, calculateRows, argument))
             {
                 fprintf(stderr, "Error creating thread\n");
@@ -346,6 +404,11 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         {
             pthread_t id = thread_ids[i];
         
+            /*
+                Join on each worker thread to process the results.
+                pthread_join can return a value different than zero to indicate a specific error type,
+                in our case, we just terminate the programm if we cant join a worker thread successfully.
+            */
             if(pthread_join(id, NULL))
             {
                 fprintf(stderr, "Error joining thread\n");
@@ -357,6 +420,10 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
         if (options->termination == TERM_PREC || term_iteration == 1)
         {
+            /*
+                combine the results for maxresiduum of each worker.
+                it resembles "reduction(max, maxresiduum)" of openmp
+            */
             for (i = 0; i < num_threads; i++)
             {
                 double thread_max = maxresiduum_cache[i];
@@ -387,6 +454,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         }
     }
 
+    /* free previously in this function dynamically allocated memory */
     free(thread_ids);
     free(args);
     free(maxresiduum_cache);
