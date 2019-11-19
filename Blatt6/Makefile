@@ -6,18 +6,19 @@ CFLAGS = -std=c11 -pedantic -Wall -Wextra -ggdb
 LFLAGS = $(CFLAGS)
 LIBS   = -lm
 
-TGTS = timempi
-OBJS = timempi.c
+TGTS = timempi timempi2
+OBJS = timempi.o timempi2.o
 # Targets ...
 all: $(TGTS)
 
-partdiff: $(OBJS) Makefile
-	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
+timempi: timempi.o Makefile
+	$(CC) $(LFLAGS) -o $@ timempi.c $(LIBS)
 
-partdiff.c: timempi.c Makefile
+timempi2: timempi2.o Makefile
+	$(CC) $(LFLAGS) -o $@ timempi2.c $(LIBS)
 
 # Rule to create *.o from *.c
-%.o: %.c
+%.o: %.c Makefile
 	$(CC) -c $(CFLAGS) $*.c
 
 clean:
