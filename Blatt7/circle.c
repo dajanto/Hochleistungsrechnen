@@ -7,12 +7,10 @@
 int signal = 1;
 
 int*
-init (int N, int rank, int nprocs)
+init (int N, int rank, int nprocs, int base, int length)
 {
 	// TODO
-	int base = N / nprocs;
 	int rest = N % nprocs;
-	int length = base + 1;
 
 	int* buf = malloc(sizeof(int) * length);
 
@@ -103,7 +101,7 @@ circle (int* buf, int rank, int nprocs, int length)
 void print_processes(int rank, int* buf, int basis, int nprocs)
 {
 	int base = basis;
-//int length = base + 1;
+
 	if (rank == 0)
 	{
     MPI_Send(&signal, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
@@ -178,32 +176,56 @@ main (int argc, char** argv)
 	// Array length
 	N = atoi(argv[1]);
 
+	if(N < nprocs)
+	{
+		printf("Arguments error!\nPlease don't use more processes than Array-Entries.\n");
+		MPI_Finalize();
+		return EXIT_FAILURE;
+	}
+
 	int base = N / nprocs;
 	int length = base + 1;
 
-	buf = init(N, rank, nprocs);
+	buf = init(N, rank, nprocs, base, length);
 
+	if (nprocs > 1)
+	{
+		if (rank == 0)
+		{
+			printf("\nBEFORE\n");
+		}
 
-	// TODO
-	//rank = 0;
+		print_processes(rank, buf, base, nprocs);
 
-	if (rank == 0)
+		MPI_Barrier(MPI_COMM_WORLD);
+
+		circle(buf, rank, nprocs, length);
+
+		if (rank == 0)
+		{
+			printf("\nAFTER\n");
+		}
+
+		print_processes(rank, buf, base, nprocs);
+	}
+	else
 	{
 		printf("\nBEFORE\n");
-	}
 
-	print_processes(rank, buf, base, nprocs);
+		for (int i = 0; i < N; i++)
+		{
+			printf("rank %d: %d\n", rank, buf[i]);
+		}
 
-	MPI_Barrier(MPI_COMM_WORLD);
-
-	circle(buf, rank, nprocs, length);
-
-	if (rank == 0)
-	{
 		printf("\nAFTER\n");
+
+		for (int j = 0; j < N; j++)
+		{
+			printf("rank %d: %d\n", rank, buf[j]);
+		}
+
 	}
 
-	print_processes(rank, buf, base, nprocs);
 
 	return EXIT_SUCCESS;
 }
