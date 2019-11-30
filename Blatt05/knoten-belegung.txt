@@ -1,4 +1,0 @@
-partdiff: west2
-partdiff-posix-keepalive: west1
-partdiff-posix: west4
-partdiff-openmp: west2
