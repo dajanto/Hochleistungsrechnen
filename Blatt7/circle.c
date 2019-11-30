@@ -4,8 +4,13 @@
 #include <mpi.h>
 #include <unistd.h>
 
-int signal = 1;
+int signal = 1; //Konstante die beim Senden zur Signalisierung verwendet wird
 
+/*
+Initialisierung von nprocs Arrays (in jedem Prozess ein Array). Wenn die Länge
+nicht ganz aufgeht bekommen die ersten Arrays einen Eintrag mehr bis man die
+geforderte Anzahl errreicht hat. Die restlichen Werte werden mit -1 ungültig gesetzt.
+*/
 int*
 init (int N, int rank, int nprocs, int base, int length)
 {
@@ -35,6 +40,9 @@ init (int N, int rank, int nprocs, int base, int length)
 	return buf;
 }
 
+/*
+Hilfsfunktion von cycle sendet Array-Einträge einen Prozess weiter
+*/
 void
 rotate(int* buf,int rank, int nprocs, int length)
 {
@@ -57,6 +65,11 @@ rotate(int* buf,int rank, int nprocs, int length)
 	}
 }
 
+/*
+Für das "Drehen" verantworlich, die Einträge werden weitergeschickt
+bis der Wert, des ersten Eintrags des ersten Arrays beim ersten Eintrags
+des letzten Arrays angekommen ist.
+*/
 int*
 circle (int* buf, int rank, int nprocs, int length)
 {
@@ -78,26 +91,27 @@ circle (int* buf, int rank, int nprocs, int length)
 	do
 	{
 		rotate(buf, rank, nprocs, length);
-		MPI_Barrier(MPI_COMM_WORLD);
+
 		if (goal == buf[0])
 		{
 			status = 1;
-			MPI_Bcast(&status, 1, MPI_INT, nprocs - 1, MPI_COMM_WORLD);
 		}
 		else
 		{
 			status = 0;
-			MPI_Bcast(&status, 1, MPI_INT, nprocs -1, MPI_COMM_WORLD);
 		}
+		MPI_Bcast(&status, 1, MPI_INT, nprocs -1, MPI_COMM_WORLD);
 	}
 	while(status == 0);
 
-	MPI_Barrier(MPI_COMM_WORLD);
 
 	return buf;
 }
 
-
+/*
+Für das Drucken verantworlich die Prozesse drucken nacheinander das Array,
+was sie halten.
+*/
 void print_processes(int rank, int* buf, int basis, int nprocs)
 {
 	int base = basis;
@@ -113,9 +127,6 @@ void print_processes(int rank, int* buf, int basis, int nprocs)
 		{
 			printf("rank %d: %d\n", rank, buf[base]);
 		}
-		char hostname[200];
-		gethostname(hostname, sizeof(hostname));
-		printf("%s\n", hostname);
 	}
 	else
 	{
@@ -134,12 +145,9 @@ void print_processes(int rank, int* buf, int basis, int nprocs)
 			{
 				printf("rank %d: %d\n", rank, buf[base]);
 			}
-			char hostname[200];
-			gethostname(hostname, sizeof(hostname));
-			printf("%s\n", hostname);
       if (rank + 1 != nprocs)
 			{
-          MPI_Send(&signal, 1, MPI_INT, ++rank, 0, MPI_COMM_WORLD);
+				MPI_Send(&signal, 1, MPI_INT, ++rank, 0, MPI_COMM_WORLD);
     	}
   	}
 	}
@@ -176,6 +184,7 @@ main (int argc, char** argv)
 	// Array length
 	N = atoi(argv[1]);
 
+//Für den Fall, dass der Nutzer mehr Prozesse anfordert, als er Einträge im Array hat.
 	if(N < nprocs)
 	{
 		printf("Arguments error!\nPlease don't use more processes than Array-Entries.\n");
@@ -197,6 +206,7 @@ main (int argc, char** argv)
 
 		print_processes(rank, buf, base, nprocs);
 
+//Ich bin mir nicht sicher ob die Barriere notwendig ist
 		MPI_Barrier(MPI_COMM_WORLD);
 
 		circle(buf, rank, nprocs, length);
