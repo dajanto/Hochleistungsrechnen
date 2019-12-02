@@ -493,7 +493,7 @@ main (int argc, char** argv)
     
     MPI_Barrier(MPI_COMM_WORLD);
 
-    if (arguments->rank == 0)
+    if (arguments.rank == 0)
     {
         displayMatrix(&arguments, &results, &options);
     }
