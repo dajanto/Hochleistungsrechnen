@@ -6,13 +6,17 @@ CFLAGS = -std=c11 -pedantic -Wall -Wextra -ggdb
 LFLAGS = $(CFLAGS)
 LIBS   = -lm
 
-TGTS = partdiff
-OBJS = partdiff.o askparams.o displaymatrix-mpi.o
+TGTS = partdiff partdiff-mpi.c
+OBJS = partdiff.o askparams.o
+MPI_OBJS = partdiff-mpi.o askparams.o
 
 # Targets ...
 all: $(TGTS)
 
 partdiff: $(OBJS) Makefile
+	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
+
+partdiff-mpi: $(MPI_OBJS) Makefile
 	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
 
 # Rule to create *.o from *.c
@@ -21,4 +25,5 @@ partdiff: $(OBJS) Makefile
 
 clean:
 	$(RM) $(OBJS)
+	$(RM) $(MPI_OBJS)
 	$(RM) $(TGTS)
