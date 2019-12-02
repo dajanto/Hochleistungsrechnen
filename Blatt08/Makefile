@@ -6,7 +6,7 @@ CFLAGS = -std=c11 -pedantic -Wall -Wextra -ggdb
 LFLAGS = $(CFLAGS)
 LIBS   = -lm
 
-TGTS = partdiff partdiff-mpi.c
+TGTS = partdiff partdiff-mpi
 OBJS = partdiff.o askparams.o
 MPI_OBJS = partdiff-mpi.o askparams.o
 
