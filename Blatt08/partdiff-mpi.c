@@ -433,12 +433,12 @@ DisplayMatrix (struct calculation_arguments* arguments, struct calculation_resul
                 if (line >= from && line <= to)
                 {
                     /* this line belongs to rank 0 */
-                    printf("%7.4f", Matrix[line][col]);
+                    printf("%d %7.4f", arguments->rank, Matrix[line][col]);
                 }
                 else
                 {
                     /* this line belongs to another rank and was received above */
-                    printf("%7.4f", Matrix[0][col]);
+                    printf("%d %7.4f", arguments->rank, Matrix[0][col]);
                 }
             }
 
