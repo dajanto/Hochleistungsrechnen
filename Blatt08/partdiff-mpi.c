@@ -87,7 +87,7 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     {
         end = arguments->N;
     }
-    chunkSize = start - end;
+    chunkSize = end - start;
     arguments->chunkSize = chunkSize;
     arguments->endRow = end;
     arguments->startRow = start;
