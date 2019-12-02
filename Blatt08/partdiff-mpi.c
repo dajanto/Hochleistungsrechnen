@@ -79,7 +79,7 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    int chunkSize = N / world_size;
+    int chunkSize = arguments->N / world_size;
     int start = (chunkSize * world_rank) + 1;
     int end = start + chunkSize;
 
@@ -363,23 +363,6 @@ displayStatistics (struct calculation_arguments const* arguments, struct calcula
     printf("\n");
 }
 
-/****************************************************************************/
-/** Beschreibung der Funktion displayMatrix:                               **/
-/**                                                                        **/
-/** Die Funktion displayMatrix gibt eine Matrix                            **/
-/** in einer "ubersichtlichen Art und Weise auf die Standardausgabe aus.   **/
-/**                                                                        **/
-/** Die "Ubersichtlichkeit wird erreicht, indem nur ein Teil der Matrix    **/
-/** ausgegeben wird. Aus der Matrix werden die Randzeilen/-spalten sowie   **/
-/** sieben Zwischenzeilen ausgegeben.                                      **/
-/****************************************************************************/
-static
-void
-displayMatrix (struct calculation_arguments* arguments, struct calculation_results* results, struct options* options)
-{
-    DisplayMatrix(arguments, results, options, arguments->rank, arguments->nprocs, arguments->startRow, arguments->endRow);
-}
-
 /**
  * rank and size are the MPI rank and size, respectively.
  * from and to denote the global(!) range of lines that this process is responsible for.
@@ -466,6 +449,23 @@ DisplayMatrix (struct calculation_arguments* arguments, struct calculation_resul
     fflush(stdout);
 }
 
+/****************************************************************************/
+/** Beschreibung der Funktion displayMatrix:                               **/
+/**                                                                        **/
+/** Die Funktion displayMatrix gibt eine Matrix                            **/
+/** in einer "ubersichtlichen Art und Weise auf die Standardausgabe aus.   **/
+/**                                                                        **/
+/** Die "Ubersichtlichkeit wird erreicht, indem nur ein Teil der Matrix    **/
+/** ausgegeben wird. Aus der Matrix werden die Randzeilen/-spalten sowie   **/
+/** sieben Zwischenzeilen ausgegeben.                                      **/
+/****************************************************************************/
+static
+void
+displayMatrix (struct calculation_arguments* arguments, struct calculation_results* results, struct options* options)
+{
+    DisplayMatrix(arguments, results, options, arguments->rank, arguments->nprocs, arguments->startRow, arguments->endRow);
+}
+
 /* ************************************************************************ */
 /*  main                                                                    */
 /* ************************************************************************ */
@@ -478,7 +478,7 @@ main (int argc, char** argv)
 
     askParams(&options, argc, argv);
 
-    MPI_Init(argc, argv);
+    MPI_Init(&argc, &argv);
 
     initVariables(&arguments, &results, &options);
 
