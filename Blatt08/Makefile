@@ -17,7 +17,7 @@ partdiff: $(OBJS) Makefile
 	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
 
 partdiff-mpi: $(MPI_OBJS) Makefile
-	$(CC) $(LFLAGS) -o $@ $(OBJS) $(LIBS)
+	$(CC) $(LFLAGS) -o $@ $(MPI_OBJS) $(LIBS)
 
 # Rule to create *.o from *.c
 %.o: %.c Makefile
