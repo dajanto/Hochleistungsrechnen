@@ -490,11 +490,16 @@ main (int argc, char** argv)
     gettimeofday(&comp_time, NULL);
 
     displayStatistics(&arguments, &results, &options);
-    displayMatrix(&arguments, &results, &options);
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (arguments->rank == 0)
+    {
+        displayMatrix(&arguments, &results, &options);
+    }
 
     freeMatrices(&arguments);
 
-    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
     return 0;
 }
