@@ -74,7 +74,7 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     // Get the number of processes
     int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    
+
     // Get the rank of the process
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
@@ -85,9 +85,10 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
 
     if ((world_rank+1) >= world_size)
     {
-        end = arguments->N;
+        end = arguments->N -1;
+        chunkSize = chunkSize + (arguments->N - end);
     }
-    chunkSize = end - start;
+
     arguments->chunkSize = chunkSize;
     arguments->endRow = end;
     arguments->startRow = start;
@@ -222,6 +223,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     int const N = arguments->N;
     double const h = arguments->h;
     double chunkSize = arguments->chunkSize;
+    int rowOffset = arguments->startRow - 1;
 
     double pih = 0.0;
     double fpisin = 0.0;
@@ -260,7 +262,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
             if (options->inf_func == FUNC_FPISIN)
             {
-                fpisin_i = fpisin * sin(pih * (double)i);
+                fpisin_i = fpisin * sin(pih * ((double)i + rowOffset));
             }
 
             /* over all columns */
@@ -375,7 +377,7 @@ displayStatistics (struct calculation_arguments const* arguments, struct calcula
  */
 static
 void
-DisplayMatrix (struct calculation_arguments* arguments, struct calculation_results* results, struct options* options, int rank, int size, int from, int to)
+DisplayMatrix (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options, int rank, int size, int from, int to)
 {
     int const elements = 8 * options->interlines + 9;
 
@@ -426,6 +428,16 @@ DisplayMatrix (struct calculation_arguments* arguments, struct calculation_resul
 
         if (rank == 0)
         {
+            if (line >= from && line <= to)
+            {
+                /* this line belongs to rank 0 */
+                printf("%ld %3d ", arguments->rank, line);
+            }
+            else
+            {
+                /* this line belongs to another rank and was received above */
+                printf("%d %3d ", status.MPI_SOURCE, line);
+            }
             for (x = 0; x < 9; x++)
             {
                 int col = x * (options->interlines + 1);
@@ -433,12 +445,12 @@ DisplayMatrix (struct calculation_arguments* arguments, struct calculation_resul
                 if (line >= from && line <= to)
                 {
                     /* this line belongs to rank 0 */
-                    printf("%ld %7.4f", arguments->rank, Matrix[line][col]);
+                    printf("%7.4f", Matrix[line][col]);
                 }
                 else
                 {
                     /* this line belongs to another rank and was received above */
-                    printf("%ld %7.4f", arguments->rank, Matrix[0][col]);
+                    printf("%7.4f", Matrix[0][col]);
                 }
             }
 
@@ -461,7 +473,7 @@ DisplayMatrix (struct calculation_arguments* arguments, struct calculation_resul
 /****************************************************************************/
 static
 void
-displayMatrix (struct calculation_arguments* arguments, struct calculation_results* results, struct options* options)
+displayMatrix (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
 {
     DisplayMatrix(arguments, results, options, arguments->rank, arguments->nprocs, arguments->startRow, arguments->endRow);
 }
@@ -481,7 +493,7 @@ main (int argc, char** argv)
     MPI_Init(&argc, &argv);
 
     initVariables(&arguments, &results, &options);
-
+    printf("Rank: %ld, Size: %ld, chunkSize: %ld, from: %ld, to: %ld, N: %ld\n", arguments.rank, arguments.nprocs, arguments.chunkSize, arguments.startRow, arguments.endRow, arguments.N);
     allocateMatrices(&arguments);
     initMatrices(&arguments, &options);
 
@@ -492,11 +504,7 @@ main (int argc, char** argv)
     displayStatistics(&arguments, &results, &options);
     
     MPI_Barrier(MPI_COMM_WORLD);
-
-    if (arguments.rank == 0)
-    {
-        displayMatrix(&arguments, &results, &options);
-    }
+    displayMatrix(&arguments, &results, &options);
 
     freeMatrices(&arguments);
 
