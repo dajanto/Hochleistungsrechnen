@@ -34,7 +34,7 @@ struct MPI_Op MPI_MINLOC;
 
 struct MPI_Comm MPI_COMM_WORLD;
 
-struct MPI_Status MPI_IGNORE;
+struct MPI_Status MPI_STATUS_IGNORE;
 
 struct MPI_Datatype MPI_INT;
 struct MPI_Datatype MPI_FLOAT;
