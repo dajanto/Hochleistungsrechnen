@@ -79,16 +79,17 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    int chunkSize = arguments->N / world_size;
+    int chunkSize = (arguments->N - 1) / world_size;
     int start = (chunkSize * world_rank) + 1;
-    int end = start + chunkSize;
+    int end = start + chunkSize - 1;
 
     if ((world_rank+1) >= world_size)
     {
-        end = arguments->N -1;
-        chunkSize = chunkSize + (arguments->N - end);
+        chunkSize = chunkSize + (arguments->N - end) - 1;
+        end = arguments->N - 1;
     }
 
+    chunkSize++;
     arguments->chunkSize = chunkSize;
     arguments->endRow = end;
     arguments->startRow = start;
@@ -157,7 +158,7 @@ allocateMatrices (struct calculation_arguments* arguments)
 
         for (j = 0; j <= chunkSize; j++)
         {
-            arguments->Matrix[i][j] = arguments->M + (i * (chunkSize + 1) * (chunkSize + 1)) + (j * (N + 1));
+            arguments->Matrix[i][j] = arguments->M + (i * (N + 1) * (chunkSize + 1)) + (j * (N + 1));
         }
     }
 }
@@ -175,6 +176,7 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
     uint64_t const chunkSize = arguments->chunkSize;
     double const h = arguments->h;
     double*** Matrix = arguments->Matrix;
+    int rowOffset = arguments->startRow - 1;
 
     /* initialize matrix/matrices with zeros */
     for (g = 0; g < arguments->num_matrices; g++)
@@ -195,10 +197,10 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
         {
             for (i = 0; i <= chunkSize; i++)
             {
-                Matrix[g][i][0] = 1.0 - (h * i);
-                Matrix[g][i][N] = h * i;
-                Matrix[g][0][i] = 1.0 - (h * i);
-                Matrix[g][chunkSize][i] = h * i;
+                Matrix[g][i][0] = 1.0 - (h * (i + rowOffset));
+                Matrix[g][i][N] = h * (i + rowOffset);
+                Matrix[g][0][i] = 1.0 - (h * (i + rowOffset));
+                Matrix[g][chunkSize][i] = h * (i + rowOffset);
             }
 
             Matrix[g][chunkSize][0] = 0.0;
@@ -219,6 +221,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     double star;                                /* four times center value minus 4 neigh.b values */
     double residuum;                            /* residuum of current iteration */
     double maxresiduum;                         /* maximum residuum value of a slave in iteration */
+    double recvmaxresiduum;                     /* tmp holder for maximum residuum value of global in iteration */
 
     int const N = arguments->N;
     double const h = arguments->h;
@@ -248,6 +251,22 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     {
         pih = PI * h;
         fpisin = 0.25 * TWO_PI_SQUARE * h * h;
+    }
+
+    if (rank < lastRank)
+    {
+        MPI_Send(arguments->Matrix[m2][chunkSize - 1], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+    }
+
+    if (rank > 0)
+    {
+        MPI_Recv(arguments->Matrix[m2][0], N + 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(arguments->Matrix[m2][1], N - 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+    }
+
+    if (rank < lastRank)
+    {
+        MPI_Recv(arguments->Matrix[m2][chunkSize], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
     while (term_iteration > 0)
@@ -288,6 +307,12 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
             }
         }
 
+        MPI_Allreduce(&maxresiduum, &recvmaxresiduum, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        maxresiduum = recvmaxresiduum;
+
+        results->stat_iteration++;
+        results->stat_precision = maxresiduum;
+
         if (rank < lastRank)
         {
             MPI_Send(Matrix_Out[chunkSize - 1], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
@@ -303,9 +328,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         {
             MPI_Recv(Matrix_Out[chunkSize], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
-
-        results->stat_iteration++;
-        results->stat_precision = maxresiduum;
 
         /* exchange m1 and m2 */
         i = m1;
@@ -446,16 +468,6 @@ DisplayMatrix (struct calculation_arguments const* arguments, struct calculation
 
         if (rank == 0)
         {
-            if (line >= from && line <= to)
-            {
-                /* this line belongs to rank 0 */
-                printf("%ld %3d ", arguments->rank, line);
-            }
-            else
-            {
-                /* this line belongs to another rank and was received above */
-                printf("%d %3d ", status.MPI_SOURCE, line);
-            }
             for (x = 0; x < 9; x++)
             {
                 int col = x * (options->interlines + 1);
@@ -511,15 +523,7 @@ main (int argc, char** argv)
     MPI_Init(&argc, &argv);
 
     initVariables(&arguments, &results, &options);
-    printf(
-        "Rank: %ld, Size: %ld, chunkSize: %ld, from: %ld, to: %ld, N: %ld\n",
-        arguments.rank,
-        arguments.nprocs,
-        arguments.chunkSize,
-        arguments.startRow,
-        arguments.endRow,
-        arguments.N
-    );
+
     allocateMatrices(&arguments);
     initMatrices(&arguments, &options);
 
@@ -530,7 +534,7 @@ main (int argc, char** argv)
     if (arguments.rank == 0){
         displayStatistics(&arguments, &results, &options);
     }
-    
+
     MPI_Barrier(MPI_COMM_WORLD);
     displayMatrix(&arguments, &results, &options);
 
