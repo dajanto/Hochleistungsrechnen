@@ -222,7 +222,9 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
     int const N = arguments->N;
     double const h = arguments->h;
-    double chunkSize = arguments->chunkSize;
+    int chunkSize = arguments->chunkSize;
+    int rank = arguments->rank;
+    int lastRank = arguments->nprocs - 1;
     int rowOffset = arguments->startRow - 1;
 
     double pih = 0.0;
@@ -256,7 +258,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         maxresiduum = 0;
 
         /* over all rows */
-        for (i = 1; i < chunkSize; i++)
+        for (i = chunkSize - 1; i > 0; i--)
         {
             double fpisin_i = 0.0;
 
@@ -284,6 +286,22 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
                 Matrix_Out[i][j] = star;
             }
+        }
+
+        if (rank < lastRank)
+        {
+            MPI_Send(Matrix_Out[chunkSize - 1], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+        }
+
+        if (rank > 0)
+        {
+            MPI_Recv(Matrix_Out[0], N + 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(Matrix_Out[1], N - 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+        }
+
+        if (rank < lastRank)
+        {
+            MPI_Recv(Matrix_Out[chunkSize], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
         results->stat_iteration++;
@@ -322,7 +340,7 @@ displayStatistics (struct calculation_arguments const* arguments, struct calcula
     double time = (comp_time.tv_sec - start_time.tv_sec) + (comp_time.tv_usec - start_time.tv_usec) * 1e-6;
 
     printf("Berechnungszeit:    %f s \n", time);
-    printf("Speicherbedarf:     %f MiB\n", (arguments->chunkSize + 1) * (N + 1) * sizeof(double) * arguments->num_matrices / 1024.0 / 1024.0);
+    printf("Speicherbedarf:     %f MiB\n", (arguments->chunkSize + 1) * (N + 1) * sizeof(double) * arguments->nprocs * arguments->num_matrices / 1024.0 / 1024.0);
     printf("Berechnungsmethode: ");
 
     if (options->method == METH_GAUSS_SEIDEL)
@@ -493,7 +511,15 @@ main (int argc, char** argv)
     MPI_Init(&argc, &argv);
 
     initVariables(&arguments, &results, &options);
-    printf("Rank: %ld, Size: %ld, chunkSize: %ld, from: %ld, to: %ld, N: %ld\n", arguments.rank, arguments.nprocs, arguments.chunkSize, arguments.startRow, arguments.endRow, arguments.N);
+    printf(
+        "Rank: %ld, Size: %ld, chunkSize: %ld, from: %ld, to: %ld, N: %ld\n",
+        arguments.rank,
+        arguments.nprocs,
+        arguments.chunkSize,
+        arguments.startRow,
+        arguments.endRow,
+        arguments.N
+    );
     allocateMatrices(&arguments);
     initMatrices(&arguments, &options);
 
@@ -501,7 +527,9 @@ main (int argc, char** argv)
     calculate(&arguments, &results, &options);
     gettimeofday(&comp_time, NULL);
 
-    displayStatistics(&arguments, &results, &options);
+    if (arguments.rank == 0){
+        displayStatistics(&arguments, &results, &options);
+    }
     
     MPI_Barrier(MPI_COMM_WORLD);
     displayMatrix(&arguments, &results, &options);

@@ -5,62 +5,62 @@
 int*
 init (int N)
 {
-	// TODO
-	int* buf = malloc(sizeof(int) * N);
+    // TODO
+    int* buf = malloc(sizeof(int) * N);
 
-	srand(time(NULL));
+    srand(time(NULL));
 
-	for (int i = 0; i < N; i++)
-	{
-		// Do not modify "% 25"
-		buf[i] = rand() % 25;
-	}
+    for (int i = 0; i < N; i++)
+    {
+        // Do not modify "% 25"
+        buf[i] = rand() % 25;
+    }
 
-	return buf;
+    return buf;
 }
 
 int*
 circle (int* buf)
 {
-	// TODO
-	return buf;
+    // TODO
+    return buf;
 }
 
 int
 main (int argc, char** argv)
 {
-	int N;
-	int rank;
-	int* buf;
+    int N;
+    int rank;
+    int* buf;
 
-	if (argc < 2)
-	{
-		printf("Arguments error!\nPlease specify a buffer size.\n");
-		return EXIT_FAILURE;
-	}
+    if (argc < 2)
+    {
+        printf("Arguments error!\nPlease specify a buffer size.\n");
+        return EXIT_FAILURE;
+    }
 
-	// Array length
-	N = atoi(argv[1]);
-	buf = init(N);
+    // Array length
+    N = atoi(argv[1]);
+    buf = init(N);
 
-	// TODO
-	rank = 0;
+    // TODO
+    rank = 0;
 
-	printf("\nBEFORE\n");
+    printf("\nBEFORE\n");
 
-	for (int i = 0; i < N; i++)
-	{
-		printf("rank %d: %d\n", rank, buf[i]);
-	}
+    for (int i = 0; i < N; i++)
+    {
+        printf("rank %d: %d\n", rank, buf[i]);
+    }
 
-	circle(buf);
+    circle(buf);
 
-	printf("\nAFTER\n");
+    printf("\nAFTER\n");
 
-	for (int j = 0; j < N; j++)
-	{
-		printf("rank %d: %d\n", rank, buf[j]);
-	}
+    for (int j = 0; j < N; j++)
+    {
+        printf("rank %d: %d\n", rank, buf[j]);
+    }
 
-	return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
