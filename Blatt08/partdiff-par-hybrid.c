@@ -27,6 +27,7 @@
 #include <malloc.h>
 #include <sys/time.h>
 #include <mpi.h>
+#include <omp.h>
 
 #include "partdiff.h"
 
@@ -226,6 +227,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     int const N = arguments->N;
     double const h = arguments->h;
     int chunkSize = arguments->chunkSize;
+    int lastRowIndex = chunkSize -1;
     int rank = arguments->rank;
     int lastRank = arguments->nprocs - 1;
     int rowOffset = arguments->startRow - 1;
@@ -255,7 +257,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
     if (rank < lastRank)
     {
-        MPI_Send(arguments->Matrix[m2][chunkSize - 1], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(arguments->Matrix[m2][lastRowIndex], N + 1, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
     }
 
     if (rank > 0)
@@ -276,8 +278,10 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
         maxresiduum = 0;
 
+
+        #pragma omp parallel for private(i, j, star, residuum) reduction(max: maxresiduum)
         /* over all rows */
-        for (i = chunkSize - 1; i > 0; i--)
+        for (i = lastRowIndex; i > 0; i--)
         {
             double fpisin_i = 0.0;
 
@@ -520,7 +524,16 @@ main (int argc, char** argv)
 
     askParams(&options, argc, argv);
 
-    MPI_Init(&argc, &argv);
+    int providedSupport;
+
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &providedSupport);
+
+    if (providedSupport < MPI_THREAD_FUNNELED)
+    {
+        printf("System does not support at least MPI_THREAD_FUNNELED\n");
+        exit(1);
+    }
+    omp_set_num_threads(options.number);
 
     initVariables(&arguments, &results, &options);
 
