@@ -263,7 +263,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     if (rank > 0)
     {
         MPI_Recv(arguments->Matrix[m2][0], N + 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(arguments->Matrix[m2][1], N - 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+        MPI_Send(arguments->Matrix[m2][1], N + 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
     }
 
     if (rank < lastRank)
@@ -325,7 +325,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
         if (rank > 0)
         {
             MPI_Recv(Matrix_Out[0], N + 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(Matrix_Out[1], N - 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+            MPI_Send(Matrix_Out[1], N + 1, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
         }
 
         if (rank < lastRank)
