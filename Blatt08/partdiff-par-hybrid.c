@@ -366,7 +366,7 @@ displayStatistics (struct calculation_arguments const* arguments, struct calcula
     double time = (comp_time.tv_sec - start_time.tv_sec) + (comp_time.tv_usec - start_time.tv_usec) * 1e-6;
 
     printf("Berechnungszeit:    %f s \n", time);
-    printf("Speicherbedarf:     %f MiB\n", (arguments->chunkSize + 1) * (N + 1) * sizeof(double) * arguments->nprocs * arguments->num_matrices / 1024.0 / 1024.0);
+    printf("Speicherbedarf:     %f MiB\n", (N + 1) * (N + 1) * sizeof(double) * arguments->num_matrices / 1024.0 / 1024.0);
     printf("Berechnungsmethode: ");
 
     if (options->method == METH_GAUSS_SEIDEL)
