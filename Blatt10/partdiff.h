@@ -52,4 +52,4 @@ struct options
 /* - askparams.c               */
 /* - displaymatrix.c           */
 /* *************************** */
-void askParams (struct options*, int, char**);
+void askParams (struct options*, int, char**, int);
