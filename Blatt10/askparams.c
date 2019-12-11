@@ -84,8 +84,12 @@
 
 static
 void
-usage (char* name)
+usage (char* name, int rank)
 {
+    if (rank != 0)
+    {
+        return;
+    }
     printf("Usage: %s [num] [method] [lines] [func] [term] [prec/iter]\n", name);
     printf("\n");
     printf("  - num:       number of threads (1 .. %d)\n", MAX_THREADS);
@@ -157,18 +161,21 @@ check_term_iteration (struct options* options)
 }
 
 void
-askParams (struct options* options, int argc, char** argv)
+askParams (struct options* options, int argc, char** argv, int rank)
 {
     int ret;
 
-    printf("============================================================\n");
-    printf("Program for calculation of partial differential equations.  \n");
-    printf("============================================================\n");
-    printf("(c) Dr. Thomas Ludwig, TU München.\n");
-    printf("    Thomas A. Zochler, TU München.\n");
-    printf("    Andreas C. Schmidt, TU München.\n");
-    printf("============================================================\n");
-    printf("\n");
+    if (rank == 0)
+    {
+        printf("============================================================\n");
+        printf("Program for calculation of partial differential equations.  \n");
+        printf("============================================================\n");
+        printf("(c) Dr. Thomas Ludwig, TU München.\n");
+        printf("    Thomas A. Zochler, TU München.\n");
+        printf("    Andreas C. Schmidt, TU München.\n");
+        printf("============================================================\n");
+        printf("\n");
+    }
 
     if (argc < 2)
     {
@@ -273,7 +280,7 @@ askParams (struct options* options, int argc, char** argv)
     {
         if (argc < 7 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "-?") == 0)
         {
-            usage(argv[0]);
+            usage(argv[0], rank);
             exit(0);
         }
 
@@ -281,7 +288,7 @@ askParams (struct options* options, int argc, char** argv)
 
         if (ret != 1 || !check_number(options))
         {
-            usage(argv[0]);
+            usage(argv[0], rank);
             exit(1);
         }
 
@@ -289,7 +296,7 @@ askParams (struct options* options, int argc, char** argv)
 
         if (ret != 1 || !check_method(options))
         {
-            usage(argv[0]);
+            usage(argv[0], rank);
             exit(1);
         }
 
@@ -297,7 +304,7 @@ askParams (struct options* options, int argc, char** argv)
 
         if (ret != 1 || !check_interlines(options))
         {
-            usage(argv[0]);
+            usage(argv[0], rank);
             exit(1);
         }
 
@@ -305,7 +312,7 @@ askParams (struct options* options, int argc, char** argv)
 
         if (ret != 1 || !check_inf_func(options))
         {
-            usage(argv[0]);
+            usage(argv[0], rank);
             exit(1);
         }
 
@@ -313,7 +320,7 @@ askParams (struct options* options, int argc, char** argv)
 
         if (ret != 1 || !check_termination(options))
         {
-            usage(argv[0]);
+            usage(argv[0], rank);
             exit(1);
         }
 
@@ -324,7 +331,7 @@ askParams (struct options* options, int argc, char** argv)
 
             if (ret != 1 || !check_term_precision(options))
             {
-                usage(argv[0]);
+                usage(argv[0], rank);
                 exit(1);
             }
         }
@@ -335,7 +342,7 @@ askParams (struct options* options, int argc, char** argv)
 
             if (ret != 1 || !check_term_iteration(options))
             {
-                usage(argv[0]);
+                usage(argv[0], rank);
                 exit(1);
             }
         }

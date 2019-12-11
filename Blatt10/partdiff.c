@@ -377,7 +377,7 @@ main (int argc, char** argv)
     struct calculation_arguments arguments;
     struct calculation_results results;
 
-    askParams(&options, argc, argv);
+    askParams(&options, argc, argv, 0);
 
     initVariables(&arguments, &results, &options);
 
