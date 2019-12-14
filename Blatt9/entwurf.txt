@@ -1,3 +1,7 @@
+/*Anmerkung: Die 1. Zeile  von Prozess 0  bzw. die letzte vom Prozess mit dem höchsten Rang müssen noch vor dem Rechnen initialisiert werden, dies
+  ist im folgenden vernachlässigt. Diese würde dann in upper bzw below gespeichert werden.
+  */
+
 
 void calculate(struct calculation_arguments arguments, struct calculation_results results, struct options options)
 {
@@ -6,7 +10,6 @@ void calculate(struct calculation_arguments arguments, struct calculation_result
   blockSize = arguments.blockSize //Größe eines Blockes
   rank = arguments.rank
   lastRank = arguments.nprocs - 1
-  rowOffset = arguments->startRow - 1
   upper = arguments.upperLines // Buffer für die überliegende Halo-Line (ausgehend von der zu bearbeitenen Zeile)
   below = arguments.belowLines // Buffer für die darunter liegende Halo Line (ausgehend von der zu bearbeitenen Zeile)
   startLine = arguments.startLine // erste Zeile der Matrix für die der Prozess zuständig ist.
@@ -45,7 +48,7 @@ void calculate(struct calculation_arguments arguments, struct calculation_result
 
           if (options.inf_func == FUNC_FPISIN)
           {
-              fpisin_i = fpisin * sin(pih * (double)i) 
+              fpisin_i = fpisin * sin(pih * (double)i)
           }
 
           currentBlockStartIndicator = 1
