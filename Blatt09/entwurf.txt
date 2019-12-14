@@ -1,0 +1,99 @@
+calculate(arguments, results, options)
+    N = arguments.N
+    h = arguments.h
+    rank = arguments.rank
+    nprocs = arguments.nprocs
+    chunkSize = arguments.chunkSize
+    // holds the lines before and after the lines that this process owns
+    surroundingLines = arguments.surroundingLines
+
+    pih = 0.0
+    fpisin = 0.0
+
+    term_iteration = options.term_iteration
+
+    // initialize m1 and m2 with gauß seidel
+    m1 = 0
+    m2 = 0
+
+    if (options.inf_func == FUNC_FPISIN)
+        pih = PI * h
+        fpisin = 0.25 * TWO_PI_SQUARE * h * h
+
+
+    while term_iteration > 0:
+        Matrix_Out = arguments.Matrix[m1]
+        Matrix_In  = arguments.Matrix[m2]
+
+        maxresiduum = 0
+
+        // over all rows this process owns
+        for (i = 0, other_i = 0; i < N; i++, other_i += 2)
+            current_line = indexToLine(rank, nprocs, i)
+            previous_line_owner = get_previous_line_owner(current_line, nprocs)
+            next_line_owner = get_next_line_owner(current_line, nprocs)
+            notFirstRow = current_line > 1;
+            notLastRow = current_line < (N - 1)
+            fpisin_i = 0.0
+
+            if options.inf_func == FUNC_FPISIN:
+                fpisin_i = fpisin * sin(pih * (double)indexToLine(rank, nprocs, i))
+
+            // set the start boundaries of column chunk
+            chunkStart = 1
+            chunkEnd = 1 + chunkSize
+
+            // over all columns 
+            for (j = 1; j < N; j++)
+                if j == chunkStart:
+                    // communicate column chunks with previous neighbor before calculating the current iteration
+                    if notFirstRow:
+                        // send 'old' values of chunk to previous neighbor
+                        MPI_Send(&Matrix_In[i] + chunkStart, chunkSize, MPI_DOUBLE, previous_line_owner, 1, ...)
+                        // receive new values from previous neighbor (the chunk of the previous line)
+                        MPI_Recv(&surroundingLines[other_i] + chunkStart, chunkSize, MPI_DOUBLE, previous_line_owner, 0, ...)
+
+                    // receive column chunks of next neighbor
+                    if notLastRow:
+                        // receive the values of the previous iteration for the chunk of the next line of next neighbor
+                        MPI_Recv(&surroundingLines[other_i + 1] + chunkStart, chunkSize, MPI_DOUBLE, next_line_owner, 1, ...)
+
+                star = 0.25 * (surroundingLines[other_i][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + surroundingLines[other_i+1][j])
+
+                if options.inf_func == FUNC_FPISIN:
+                    star += fpisin_i * sin(pih * (double)j
+
+                if options.termination == TERM_PREC || term_iteration == 1:
+                    residuum = Matrix_In[i][j] - star
+                    residuum = (residuum < 0) ? -residuum : residuum
+                    maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum
+
+                Matrix_Out[i][j] = star
+
+                if (j >= chunkEnd || j >= N - 1) && notLastRow:
+                    // send updated chunk of current iteration to next neighbor
+                    MPI_Send(&Matrix_Out[i] + chunkStart, chunkSize, MPI_DOUBLE, next_line_owner, 0, ...)
+
+                    // update chunk bounds, as this chunk is completly calculated for this term_iteration
+                    chunkStart += chunkSize
+                    chunkEnd += chunkSize
+
+        // update maxresiduum for all processes, act as a synchronizing barrier
+        MPI_Allreduce(MPI_IN_PLACE, &maxresiduum, 1 MPI_DOUBLE, MPI_MAX, ...)
+
+        results.stat_iteration++
+        results.stat_precision = maxresiduum
+
+        // exchange m1 and m2 
+        i = m1
+        m1 = m2
+        m2 = i
+
+        // check for stopping calculation depending on termination method 
+        if options.termination == TERM_PREC:
+            if maxresiduum < options.term_precision:
+                term_iteration = 0
+        else if options.termination == TERM_ITER:
+            term_iteration--
+
+    results.m = m2
