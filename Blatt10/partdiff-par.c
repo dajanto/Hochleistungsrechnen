@@ -519,22 +519,22 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
                 {
                     if (notFirstRow)
                     {
-                        printf("Sending to %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld) with j: %ld\n", ownerOfPreviousLine, chunkStart, chunkEnd, rank, i, current_line, j);
+                        printf("Sending to %ld (0) from Rank %2ld Row %2ld(%2ld) with j: %ld\n", ownerOfPreviousLine, rank, i, current_line, j);
                         MPI_Send(Matrix_In[i], size, MPI_DOUBLE, ownerOfPreviousLine, current_line, MPI_COMM_WORLD);
-                        printf("Waiting on %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld)\n", rank, chunkStart, chunkEnd, ownerOfPreviousLine, current_line, current_line - 1);
+                        printf("Waiting on %ld (1) from Rank %2ld Row %2ld(%2ld)\n", rank, ownerOfPreviousLine, current_line, current_line - 1);
                         MPI_Recv(cache[cache_i], size, MPI_DOUBLE, ownerOfPreviousLine, current_line - 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
                         char *chunk = printChunk(cache[cache_i], size);
-                        printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Start %2ld Received %2ld(%2ld) from %2ld: %s\n", rank, term_iteration, i, current_line, size, i - 1, current_line - 1, ownerOfPreviousLine, chunk);
+                        printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Received %2ld(%2ld) from %2ld: %s\n", rank, term_iteration, i, current_line, i - 1, current_line - 1, ownerOfPreviousLine, chunk);
                         fflush(stdout);
                         free(chunk);
                     }
                     if (beforeNextToLastRow)
                     {
-                        printf("Waiting on %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld) with j: %ld\n", rank, chunkStart, chunkEnd, ownerOfNextLine, i, current_line + 1, j);
+                        printf("Waiting on %ld (0) from Rank %2ld Row %2ld(%2ld) with j: %ld\n", rank, ownerOfNextLine, i, current_line + 1, j);
                         MPI_Recv(cache[cache_i + 1], size, MPI_DOUBLE, ownerOfNextLine, current_line + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                         char *chunk = printChunk(cache[cache_i + 1], size);
-                        printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Start %2ld Received %2ld(%2ld) from %2ld: %s\n", rank, term_iteration, i, current_line, size, i, current_line + 1, ownerOfNextLine, chunk);
+                        printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Received %2ld(%2ld) from %2ld: %s\n", rank, term_iteration, i, current_line, i, current_line + 1, ownerOfNextLine, chunk);
                         fflush(stdout);
                         free(chunk);
                     }
@@ -558,10 +558,10 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
                 /* if reached the end of the chunk or the last column, send it to the next rank if available */
                 if ((chunkEnd <= j || j >= (N - 1)) && beforeNextToLastRow)
                 {
-                    printf("Sending to %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld)\n", ownerOfNextLine, chunkStart, chunkEnd, rank, i, current_line);
+                    printf("Sending to %ld (1) from Rank %2ld Row %2ld(%2ld)\n", ownerOfNextLine, rank, i, current_line);
                     MPI_Send(Matrix_Out[i], size, MPI_DOUBLE, ownerOfNextLine, current_line, MPI_COMM_WORLD);
                     char *chunk = printChunk(Matrix_Out[i], size);
-                    printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Start %2ld Send to %2ld:              %s\n", rank, term_iteration, i, current_line, size, ownerOfNextLine, chunk);
+                    printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Send to %2ld:              %s\n", rank, term_iteration, i, current_line, ownerOfNextLine, chunk);
                     fflush(stdout);
                     free(chunk);
                     chunkStart += size;
