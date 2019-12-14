@@ -448,9 +448,9 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
     uint64_t ownerOfPreviousLine;
 
     uint64_t chunkSize = (arguments->N - 1) / nprocs;
-    uint64_t chunkRest = (N - 1) % chunkSize;
+    uint64_t chunkRest = (N - 1) % nprocs;
 
-    if (chunkRest && chunkRest < rank)
+    if (chunkRest && chunkRest > rank)
     {
         chunkSize++;
     }
