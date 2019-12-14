@@ -448,15 +448,12 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
     uint64_t ownerOfPreviousLine;
 
     uint64_t chunkSize = (arguments->N - 1) / nprocs;
-    // uint64_t start = (chunkSize * rank) + 1;
-    // uint64_t end = start + chunkSize - 1;
+    uint64_t chunkRest = (N - 1) % chunkSize;
 
-    if ((rank+1) >= nprocs)
+    if (chunkRest && chunkRest < rank)
     {
-        chunkSize = chunkSize - 1;
+        chunkSize++;
     }
-
-    chunkSize++;
 
     uint64_t cacheSize = (chunkSize + 1) * 2;
     double cache[cacheSize][size];
@@ -500,8 +497,8 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
         for (i = 0, cache_i = 0; i < chunkSize; i++, cache_i += 2)
         {
             current_line = indexTable[i];
-            ownerOfNextLine = (((current_line + 1) % nprocs) + nprocs - 1) % nprocs;
-            ownerOfPreviousLine = (((current_line - 1) % nprocs) + nprocs - 1) % nprocs;
+            ownerOfNextLine = (rank + 1) % nprocs;
+            ownerOfPreviousLine = rank ?  (rank - 1) % nprocs : nprocs - 1;
             notFirstRow = current_line > 1;
             beforeNextToLastRow = current_line < (N - 1);
             chunkStart = 1;
