@@ -281,13 +281,13 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
             {
                 uint64_t line = indexToLine(arguments, options, i);
 
-                Matrix[g][line][0] = 1.0 - (h * line);
-                Matrix[g][line][N] = h * line;
+                Matrix[g][i][0] = 1.0 - (h * line);
+                Matrix[g][i][N] = h * line;
                 Matrix[g][0][i] = 1.0 - (h * line);
                 Matrix[g][N][i] = h * line;
             }
 
-            Matrix[g][chunkSize][0] = 0.0;
+            Matrix[g][N][0] = 0.0;
             Matrix[g][0][N] = 0.0;
         }
     }
@@ -395,6 +395,26 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     results->m = m2;
 }
 
+static
+char*
+printChunk(double *chunk, uint64_t size)
+{
+    uint64_t maxLength = size * 7 + 1;
+    char *buffer = calloc(maxLength, sizeof(char));
+    int index = 0;
+    for (uint64_t i = 0; i < size; i++)
+    {
+        int written = snprintf(&buffer[index], maxLength - index, "%7.4f", chunk[i]);
+        if (written < 0)
+        {
+            printf("Could not append item to buffer\n");
+            exit(1);
+        }
+        index += written;
+    }
+    return buffer;
+}
+
 /* ************************************************************************ */
 /* calculate: solves the equation of gauß seidel in parallel with mpi only  */
 /* ************************************************************************ */
@@ -411,16 +431,48 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
     uint64_t const N = arguments->N;
     double const h = arguments->h;
 
-    uint64_t *indexTable = arguments->indexTable;
-    double **cache = arguments->cache;
-    uint64_t chunkSize = arguments->chunkSize;
+    // uint64_t *indexTable = arguments->indexTable;
+    // double **cache = arguments->cache;
+    // uint64_t chunkSize = arguments->chunkSize;
+    // uint64_t previousRankChunkSize = arguments->chunkSize;
     uint64_t rank = arguments->rank;
     uint64_t nprocs = arguments->nprocs;
-    int notFirstRank = rank > 0;
-    int notLastRank = rank < (nprocs - 1);
+    uint64_t size = N + 1;
     uint64_t chunkStart;
     uint64_t chunkEnd;
     uint64_t cache_i;
+    uint64_t current_line;
+    int notFirstRow;
+    int beforeNextToLastRow;
+    uint64_t ownerOfNextLine;
+    uint64_t ownerOfPreviousLine;
+
+    uint64_t chunkSize = (arguments->N - 1) / nprocs;
+    // uint64_t start = (chunkSize * rank) + 1;
+    // uint64_t end = start + chunkSize - 1;
+
+    if ((rank+1) >= nprocs)
+    {
+        chunkSize = chunkSize - 1;
+    }
+
+    chunkSize++;
+
+    uint64_t cacheSize = (chunkSize + 1) * 2;
+    double cache[cacheSize][size];
+    for (i = 0; i < cacheSize; i++)
+    {
+        for (j = 0; j < size; j++)
+        {
+            cache[i][j] = 0;
+        }
+    }
+    uint64_t indexTable[chunkSize];
+
+    for (i = 0; i < chunkSize; i++)
+    {
+        indexTable[i] = (i * nprocs) + rank + 1;
+    }
 
     double pih = 0.0;
     double fpisin = 0.0;
@@ -443,26 +495,52 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
         double** Matrix_In  = arguments->Matrix[m2];
 
         maxresiduum = 0;
-        chunkStart = 0;
-        chunkEnd = chunkSize;
 
         /* over all rows */
-        for (i = 1, cache_i = 0; i < chunkSize; i++, cache_i += 2)
+        for (i = 0, cache_i = 0; i < chunkSize; i++, cache_i += 2)
         {
+            current_line = indexTable[i];
+            ownerOfNextLine = (((current_line + 1) % nprocs) + nprocs - 1) % nprocs;
+            ownerOfPreviousLine = (((current_line - 1) % nprocs) + nprocs - 1) % nprocs;
+            notFirstRow = current_line > 1;
+            beforeNextToLastRow = current_line < (N - 1);
+            chunkStart = 1;
+            chunkEnd = 1 + size;
+            printf("Rank %ld Index %ld, CurrentLine: %ld, Owner of Previous: %ld, Owner of Next: %ld\n", rank, i, current_line, ownerOfPreviousLine, ownerOfNextLine);
             double fpisin_i = 0.0;
 
             if (options->inf_func == FUNC_FPISIN)
             {
-                fpisin_i = fpisin * sin(pih * (double)indexTable[i]);
+                fpisin_i = fpisin * sin(pih * (double)current_line);
             }
             // printf("i: %ld, cache_i: %ld, chunkSize: %ld\n", i, cache_i, chunkSize);
             /* over all columns */
             for (j = 1; j < N; j++)
             {
                 /* if a new chunk was just reached, wait for the previous rank if available to send chunk */
-                if (chunkStart == j && notFirstRank)
+                if (chunkStart == j)
                 {
-                    MPI_Recv(cache[cache_i] + chunkStart, chunkSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    if (notFirstRow)
+                    {
+                        printf("Sending to %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld) with j: %ld\n", ownerOfPreviousLine, chunkStart, chunkEnd, rank, i, current_line, j);
+                        MPI_Send(Matrix_In[i], size, MPI_DOUBLE, ownerOfPreviousLine, current_line, MPI_COMM_WORLD);
+                        printf("Waiting on %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld)\n", rank, chunkStart, chunkEnd, ownerOfPreviousLine, current_line, current_line - 1);
+                        MPI_Recv(cache[cache_i], size, MPI_DOUBLE, ownerOfPreviousLine, current_line - 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                        char *chunk = printChunk(cache[cache_i], size);
+                        printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Start %2ld Received %2ld(%2ld) from %2ld: %s\n", rank, term_iteration, i, current_line, size, i - 1, current_line - 1, ownerOfPreviousLine, chunk);
+                        fflush(stdout);
+                        free(chunk);
+                    }
+                    if (beforeNextToLastRow)
+                    {
+                        printf("Waiting on %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld) with j: %ld\n", rank, chunkStart, chunkEnd, ownerOfNextLine, i, current_line + 1, j);
+                        MPI_Recv(cache[cache_i + 1], size, MPI_DOUBLE, ownerOfNextLine, current_line + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        char *chunk = printChunk(cache[cache_i + 1], size);
+                        printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Start %2ld Received %2ld(%2ld) from %2ld: %s\n", rank, term_iteration, i, current_line, size, i, current_line + 1, ownerOfNextLine, chunk);
+                        fflush(stdout);
+                        free(chunk);
+                    }
                 }
                 star = 0.25 * (cache[cache_i][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + cache[cache_i + 1][j]);
 
@@ -481,16 +559,22 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
                 Matrix_Out[i][j] = star;
 
                 /* if reached the end of the chunk or the last column, send it to the next rank if available */
-                if ((chunkEnd <= j || j == (N - 1)) && notLastRank)
+                if ((chunkEnd <= j || j >= (N - 1)) && beforeNextToLastRow)
                 {
-                    MPI_Send(Matrix_Out[i] + chunkStart, chunkSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
-                    chunkStart += chunkSize;
-                    chunkEnd += chunkSize;
+                    printf("Sending to %ld Chunk %2ld - %2ld from Rank %2ld Row %2ld(%2ld)\n", ownerOfNextLine, chunkStart, chunkEnd, rank, i, current_line);
+                    MPI_Send(Matrix_Out[i], size, MPI_DOUBLE, ownerOfNextLine, current_line, MPI_COMM_WORLD);
+                    char *chunk = printChunk(Matrix_Out[i], size);
+                    printf("Rank %2ld Iteration %2d, Row %2ld(%2ld) Start %2ld Send to %2ld:              %s\n", rank, term_iteration, i, current_line, size, ownerOfNextLine, chunk);
+                    fflush(stdout);
+                    free(chunk);
+                    chunkStart += size;
+                    chunkEnd += size;
                 }
             }
         }
-
+        printf("Finished rows on Rank %ld\n", rank);
         MPI_Allreduce(MPI_IN_PLACE, &maxresiduum, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        printf("Finished Reduce on Rank %ld\n", rank);
         results->stat_iteration++;
         results->stat_precision = maxresiduum;
 
@@ -991,7 +1075,17 @@ main (int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
     initVariables(&arguments, &results, &options, world_rank, world_size);
 
-    printf("Rank: %d, Size: %d, N: %ld, Interlines: %ld. Threads: %ld\n", world_rank, world_size, arguments.N, options.interlines, options.number);
+    printf(
+        "Rank: %d, Size: %d, N: %ld, Interlines: %ld. Threads: %ld, Chunksize: %ld, ChunkStart: %ld, ChunkEnd: %ld\n",
+        world_rank,
+        world_size,
+        arguments.N,
+        options.interlines,
+        options.number,
+        arguments.chunkSize,
+        arguments.chunkStart,
+        arguments.chunkEnd
+    );
     allocateMatrices(&arguments, &options);
     initMatrices(&arguments, &options);
 
