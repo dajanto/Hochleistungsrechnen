@@ -247,6 +247,9 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
                     residuum = Matrix_In[i][j] - star;
                     residuum = (residuum < 0) ? -residuum : residuum;
                     maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
+
+                    // printf("i: %2d, j: %2d: Residuum: %7.4f\n", i, j, residuum);
+                    // fflush(stdout);
                 }
 
                 Matrix_Out[i][j] = star;

@@ -104,8 +104,6 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     results->stat_precision = 0;
 
     uint64_t chunkSize = (arguments->N - 1) / nprocs;
-    uint64_t start = (chunkSize * rank) + 1;
-    uint64_t end = start + chunkSize - 1;
     uint64_t chunkRest = (arguments->N - 1) % nprocs;
 
     // todo correct initialization for jacobi variants too
@@ -113,6 +111,9 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     {
         chunkSize++;
     }
+
+    uint64_t start = (chunkSize * rank) + 1;
+    uint64_t end = start + chunkSize - 1;
 
     arguments->chunkSize = chunkSize;
     arguments->chunkStart = start;
@@ -219,7 +220,7 @@ get_line(const struct calculation_arguments* arguments, struct calculation_resul
     {
         if (line == arguments->N)
         {
-            return arguments->cache[(arguments->chunkSize + 1) * 2 - 1];
+            return arguments->cache[(arguments->chunkSize * 2) - 1];
         }
 
         if (line == 0)
@@ -253,14 +254,14 @@ ownsLine(uint64_t rank, int size, int method, uint64_t from, uint64_t to, uint64
     else
     {
         // first line is owned by first process
-        if ((rank == 0 && line == 0))
+        if (line == 0)
         {
-            return 1;
+            return rank == 0;
         }
         // last line is owned by the process which owns the next to last line
-        if (line == last_line && ownsLine(rank, size, method, from, to, line - 1, last_line))
+        if (line == last_line)
         {
-            return 1;
+            return ownsLine(rank, size, method, from, to, line - 1, last_line);
         }
         return (line % size) == ((rank + 1) % size);
     }
@@ -308,11 +309,29 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
 
     if (useMpi_Gauss(options->method, arguments->nprocs))
     {
-        for (i = 0; i <= chunkSize * 2; i++)
+        for (i = 0; i < chunkSize * 2; i++)
         {
+            int ownsFirst = i == 0 && ownsLine(arguments->rank, arguments->nprocs, options->method, 0,0, 0, arguments->N);
+            int ownsLast = (i + 1) == (chunkSize * 2) && ownsLine(arguments->rank, arguments->nprocs, options->method, 0,0, arguments->N, arguments->N);
+            // printf("Rank %d, Cache Index %ld: Owned First: %d, Owned Last: %d\n", arguments->rank, i, ownsFirst, ownsLast);
+
             for (j = 0; j <= N; j++)
             {
-                arguments->cache[i][j] = 0;
+                if (options->inf_func == FUNC_F0 && (ownsFirst || ownsLast))
+                {
+                    if (ownsFirst)
+                    {
+                        arguments->cache[i][j] = 1.0 - (h * j);
+                    }
+                    else
+                    {
+                        arguments->cache[i][j] = h * j;
+                    }
+                }
+                else
+                {
+                    arguments->cache[i][j] = 0;
+                }
             }
         }
     }
@@ -328,12 +347,12 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
 
                 Matrix[g][i][0] = 1.0 - (h * line);
                 Matrix[g][i][N] = h * line;
-                Matrix[g][0][i] = 1.0 - (h * line);
-                Matrix[g][N][i] = h * line;
+                // Matrix[g][0][i] = 1.0 - (h * line);
+                // Matrix[g][N][i] = h * line;
             }
 
-            Matrix[g][N][0] = 0.0;
-            Matrix[g][0][N] = 0.0;
+            // Matrix[g][N][0] = 0.0;
+            // Matrix[g][0][N] = 0.0;
         }
     }
 }
@@ -592,6 +611,8 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
                     residuum = Matrix_In[i][j] - star;
                     residuum = (residuum < 0) ? -residuum : residuum;
                     maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
+                    // printf("i: %2ld(%2ld), j: %2ld: Residuum: %7.4f\n", i, indexTable[i], j, residuum);
+                    // fflush(stdout);
                 }
 
                 Matrix_Out[i][j] = star;
@@ -610,7 +631,7 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
                 }
             }
         }
-        // printf("Finished rows on Rank %ld\n", rank);
+        // printf("Finished rows on Rank %ld, Maxresiduum: %7.4f\n", rank, maxresiduum);
         MPI_Allreduce(MPI_IN_PLACE, &maxresiduum, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
         // printf("Finished Reduce on Rank %ld\n", rank);
         results->stat_iteration++;
