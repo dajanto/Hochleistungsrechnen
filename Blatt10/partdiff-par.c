@@ -94,7 +94,7 @@ useMpi_Gauss(int method, int nprocs)
 /* ************************************************************************ */
 static
 void
-initVariables (struct calculation_arguments* arguments, struct calculation_results* results, struct options const* options, int rank, int nprocs)
+initVariables (struct calculation_arguments* arguments, struct calculation_results* results, struct options const* options, uint64_t rank, uint64_t nprocs)
 {
     arguments->N = (options->interlines * 8) + 9 - 1;
     arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
@@ -106,14 +106,14 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     uint64_t chunkSize = (arguments->N - 1) / nprocs;
     uint64_t start = (chunkSize * rank) + 1;
     uint64_t end = start + chunkSize - 1;
+    uint64_t chunkRest = (arguments->N - 1) % nprocs;
 
-    if ((rank+1) >= nprocs)
+    // todo correct initialization for jacobi variants too
+    if (chunkRest && chunkRest > rank)
     {
-        chunkSize = chunkSize + (arguments->N - end) - 1;
-        end = arguments->N - 1;
+        chunkSize++;
     }
 
-    chunkSize++;
     arguments->chunkSize = chunkSize;
     arguments->chunkStart = start;
     arguments->chunkEnd = end;
@@ -122,12 +122,12 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
 
     if (useMpi_Gauss(options->method, arguments->nprocs))
     {
-        arguments->indexTable = allocateMemory((chunkSize + 1) * sizeof(uint64_t));
+        arguments->indexTable = allocateMemory((chunkSize) * sizeof(uint64_t));
         uint64_t i;
 
-        for (i = 0; i <= chunkSize; i++)
+        for (i = 0; i < chunkSize; i++)
         {
-            arguments->indexTable[i] = (i * nprocs) + rank;
+            arguments->indexTable[i] = (i * nprocs) + rank + 1;
         }
     }else
     {
@@ -143,7 +143,7 @@ void
 freeMatrices (struct calculation_arguments* arguments)
 {
     uint64_t i;
-
+    // printf("Freeing Space\n");
     for (i = 0; i < arguments->num_matrices; i++)
     {
         free(arguments->Matrix[i]);
@@ -177,27 +177,28 @@ allocateMatrices (struct calculation_arguments* arguments, struct options* optio
 
     uint64_t const N = arguments->N;
     uint64_t const chunkSize = arguments->chunkSize;
+    uint64_t const chunkLines = chunkSize + 1;
 
-    arguments->M = allocateMemory(arguments->num_matrices * (chunkSize + 1) * (N + 1) * sizeof(double));
+    arguments->M = allocateMemory(arguments->num_matrices * (chunkLines) * (N + 1) * sizeof(double));
     arguments->Matrix = allocateMemory(arguments->num_matrices * sizeof(double**));
 
     for (i = 0; i < arguments->num_matrices; i++)
     {
-        arguments->Matrix[i] = allocateMemory((chunkSize + 1) * sizeof(double*));
+        arguments->Matrix[i] = allocateMemory((chunkLines) * sizeof(double*));
 
         for (j = 0; j <= chunkSize; j++)
         {
-            arguments->Matrix[i][j] = arguments->M + (i * (chunkSize + 1) * (N + 1)) + (j * (N + 1));
+            arguments->Matrix[i][j] = arguments->M + (i * (chunkLines) * (N + 1)) + (j * (N + 1));
         }
     }
     if (useMpi_Gauss(options->method, arguments->nprocs))
     {
-        arguments->cache_line = allocateMemory((chunkSize + 1) * (N + 1) * 2 * sizeof(double));
-        
-        arguments->cache = allocateMemory((chunkSize + 1) * 2 * sizeof(double*));
+        uint64_t cacheSize = chunkLines * 2;
+        arguments->cache_line = allocateMemory(cacheSize * (N + 1) * sizeof(double));
+        arguments->cache = allocateMemory(cacheSize * sizeof(double*));
 
         /* map start of rows of cache to start of rows in linear matrix cache_line (todo: is chunkSize + 1 valid?) */
-        for (j = 0; j <= ((chunkSize+1) * 2); j++)
+        for (j = 0; j < cacheSize; j++)
         {
             arguments->cache[j] = arguments->cache_line + (j * (N + 1));
         }
@@ -211,24 +212,57 @@ allocateMatrices (struct calculation_arguments* arguments, struct options* optio
 }
 
 static
-uint64_t
-lineToIndex(const struct calculation_arguments* arguments, const struct options* options, uint64_t line)
+double*
+get_line(const struct calculation_arguments* arguments, struct calculation_results* results, const struct options* options, uint64_t line)
 {
     if (useMpi_Gauss(options->method, arguments->nprocs))
     {
-        for (uint64_t i = 0; i <= (arguments->chunkSize * 2); i++)
+        if (line == arguments->N)
+        {
+            return arguments->cache[(arguments->chunkSize + 1) * 2 - 1];
+        }
+
+        if (line == 0)
+        {
+            return arguments->cache[0];
+        }
+        for (uint64_t i = 0; i <= arguments->chunkSize; i++)
         {
             uint64_t value = arguments->indexTable[i];
             if (value == line){
-                return i;
+                return arguments->Matrix[results->m][i];
             }
         }
-        printf("Invalid Index Map, Process %d does not own Line %ld", arguments->rank, line);
+        printf("Invalid Index Map, Process %d does not own Line %ld\n", arguments->rank, line);
         exit(1);
     }
     else
     {
-        return line - arguments->chunkStart + 1;
+        return arguments->Matrix[results->m][line - arguments->chunkStart + 1];
+    }
+}
+
+static
+int
+ownsLine(uint64_t rank, int size, int method, uint64_t from, uint64_t to, uint64_t line, uint64_t last_line)
+{
+    if (method == METH_JACOBI)
+    {
+        return line >= from && line <= to;
+    }
+    else
+    {
+        // first line is owned by first process
+        if ((rank == 0 && line == 0))
+        {
+            return 1;
+        }
+        // last line is owned by the process which owns the next to last line
+        if (line == last_line && ownsLine(rank, size, method, from, to, line - 1, last_line))
+        {
+            return 1;
+        }
+        return (line % size) == ((rank + 1) % size);
     }
 }
 
@@ -268,6 +302,17 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
             for (j = 0; j <= N; j++)
             {
                 Matrix[g][i][j] = 0.0;
+            }
+        }
+    }
+
+    if (useMpi_Gauss(options->method, arguments->nprocs))
+    {
+        for (i = 0; i <= chunkSize * 2; i++)
+        {
+            for (j = 0; j <= N; j++)
+            {
+                arguments->cache[i][j] = 0;
             }
         }
     }
@@ -415,6 +460,26 @@ printChunk(double *chunk, uint64_t size)
     return buffer;
 }
 
+static
+char*
+printChunkUI(uint64_t *chunk, uint64_t size)
+{
+    uint64_t maxLength = size * 7 + 1;
+    char *buffer = calloc(maxLength, sizeof(char));
+    int index = 0;
+    for (uint64_t i = 0; i < size; i++)
+    {
+        int written = snprintf(&buffer[index], maxLength - index, "%ld ", chunk[i]);
+        if (written < 0)
+        {
+            printf("Could not append item to buffer\n");
+            exit(1);
+        }
+        index += written;
+    }
+    return buffer;
+}
+
 /* ************************************************************************ */
 /* calculate: solves the equation of gauß seidel in parallel with mpi only  */
 /* ************************************************************************ */
@@ -431,9 +496,9 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
     uint64_t const N = arguments->N;
     double const h = arguments->h;
 
-    // uint64_t *indexTable = arguments->indexTable;
-    // double **cache = arguments->cache;
-    // uint64_t chunkSize = arguments->chunkSize;
+    uint64_t *indexTable = arguments->indexTable;
+    double **cache = arguments->cache;
+    uint64_t chunkSize = arguments->chunkSize;
     // uint64_t previousRankChunkSize = arguments->chunkSize;
     uint64_t rank = arguments->rank;
     uint64_t nprocs = arguments->nprocs;
@@ -446,30 +511,6 @@ calculate_mpi_gseidel (struct calculation_arguments const* arguments, struct cal
     int beforeNextToLastRow;
     uint64_t ownerOfNextLine;
     uint64_t ownerOfPreviousLine;
-
-    uint64_t chunkSize = (arguments->N - 1) / nprocs;
-    uint64_t chunkRest = (N - 1) % nprocs;
-
-    if (chunkRest && chunkRest > rank)
-    {
-        chunkSize++;
-    }
-
-    uint64_t cacheSize = (chunkSize + 1) * 2;
-    double cache[cacheSize][size];
-    for (i = 0; i < cacheSize; i++)
-    {
-        for (j = 0; j < size; j++)
-        {
-            cache[i][j] = 0;
-        }
-    }
-    uint64_t indexTable[chunkSize];
-
-    for (i = 0; i < chunkSize; i++)
-    {
-        indexTable[i] = (i * nprocs) + rank + 1;
-    }
 
     double pih = 0.0;
     double fpisin = 0.0;
@@ -922,20 +963,6 @@ displayMatrixSingle (struct calculation_arguments* arguments, struct calculation
     fflush (stdout);
 }
 
-static
-int
-ownsLine(uint64_t rank, int size, int method, uint64_t from, uint64_t to, uint64_t line)
-{
-    if (method == METH_JACOBI)
-    {
-        return line >= from && line <= to;
-    }
-    else
-    {
-        return (line % size) == rank;
-    }
-}
-
 /**
  * rank and size are the MPI rank and size, respectively.
  * from and to denote the global(!) range of lines that this process is responsible for.
@@ -968,6 +995,8 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
         to++;
     }
 
+    // printf("Rank %d owns: %s\n", rank, printChunkUI(arguments->indexTable, arguments->chunkSize));
+
     if (rank == 0)
     {
         printf("Matrix:\n");
@@ -975,13 +1004,14 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
 
     for (y = 0; y < 9; y++)
     {
-        int line = y * (options->interlines + 1);
+        uint64_t line = y * (options->interlines + 1);
 
         if (rank == 0)
         {
             /* check whether this line belongs to rank 0 */
-            if (!ownsLine(rank, size, options->method, from, to, line))
+            if (!ownsLine(rank, size, options->method, from, to, line, arguments->N))
             {
+                // printf("Waiting for line %ld\n", line);
                 /* use the tag to receive the lines in the correct order
                 * the line is stored in Matrix[0], because we do not need it anymore */
                 MPI_Recv(Matrix[0], elements, MPI_DOUBLE, MPI_ANY_SOURCE, 42 + y, MPI_COMM_WORLD, &status);
@@ -989,11 +1019,15 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
         }
         else
         {
-            if (ownsLine(rank, size, options->method, from, to, line))
+            if (ownsLine(rank, size, options->method, from, to, line, arguments->N))
             {
+                double *line_array = get_line(arguments, results, options, line);
                 /* if the line belongs to this process, send it to rank 0
                 * (line - from + 1) is used to calculate the correct local address */
-                MPI_Send(Matrix[lineToIndex(arguments, options, line)], elements, MPI_DOUBLE, 0, 42 + y, MPI_COMM_WORLD);
+                MPI_Send(line_array, elements, MPI_DOUBLE, 0, 42 + y, MPI_COMM_WORLD);
+            }else
+            {
+                // printf("Rank %d does not own line %ld\n", rank, line);
             }
         }
 
@@ -1003,10 +1037,11 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
             {
                 int col = x * (options->interlines + 1);
 
-                if (ownsLine(rank, size, options->method, from, to, line))
+                if (ownsLine(rank, size, options->method, from, to, line, arguments->N))
                 {
+                    double *line_array = get_line(arguments, results, options, line);
                     /* this line belongs to rank 0 */
-                    printf("%7.4f", Matrix[lineToIndex(arguments, options, line)][col]);
+                    printf("%7.4f", line_array[col]);
                 }
                 else
                 {
