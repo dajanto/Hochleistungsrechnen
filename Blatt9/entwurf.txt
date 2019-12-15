@@ -9,7 +9,6 @@ void calculate(struct calculation_arguments arguments, struct calculation_result
   h = arguments.h
   blockSize = arguments.blockSize //Größe eines Blockes
   rank = arguments.rank
-  lastRank = arguments.nprocs - 1
   upper = arguments.upperLines // Buffer für die überliegende Halo-Line (ausgehend von der zu bearbeitenen Zeile)
   below = arguments.belowLines // Buffer für die darunter liegende Halo Line (ausgehend von der zu bearbeitenen Zeile)
   startLine = arguments.startLine // erste Zeile der Matrix für die der Prozess zuständig ist.
@@ -39,16 +38,17 @@ void calculate(struct calculation_arguments arguments, struct calculation_result
       maxresiduum = 0
 
       /* over all rows
-      Die Zeilen für die die Prozesse zuständig sind, sind gleichmäßig auf die Prozesse verteilt;
+    Annahme:  Die Zeilen für die die Prozesse zuständig sind, sind gleichmäßig auf die Prozesse verteilt;
       bei einem Überlauf bekommen die ersten Prozesse jeweils eine zusätzliche Zeile */
 
       for (i = startLine; i == endLine; i = i + nprocs)
       {
+          line = i;
           fpisin_i = 0.0
 
           if (options.inf_func == FUNC_FPISIN)
           {
-              fpisin_i = fpisin * sin(pih * (double)i)
+              fpisin_i = fpisin * sin(pih * (double)i) //i gelassen da es so im Originalcode vorhanden ist; line ginge auch
           }
 
           currentBlockStartIndicator = 1
@@ -56,17 +56,17 @@ void calculate(struct calculation_arguments arguments, struct calculation_result
           /* over all columns */
           for (j = 1; j < N; j++)
           {
-              if((rank != 0) && (j >= currentBlockStartIndicator))
+              if((line == 1) && (j >= currentBlockStartIndicator))
               {
-                MPI_Send(&Matrix_Out[i] + currentBlockStartIndicator, blockSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD)
-                MPI_Recv(upper[currentBlockStartIndicator], blockSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE)
+                MPI_Send(&Matrix_Out[i] + currentBlockStartIndicator, blockSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD) //versenden der Nachfolgerzeile
+                MPI_Recv(upper[currentBlockStartIndicator], blockSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE) //empfangen der Vorgänger-Zeile
               }
-              if((rank != lastRank) && (j > currentBlockEndIndicator))
+              if((line == N-1) && (j > currentBlockEndIndicator))
               {
-                MPI_Recv(below[currentBlockStartIndicator], blockSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE)
+                MPI_Recv(below[currentBlockStartIndicator], blockSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE) //empfangen der Nachfolgerzeile
               }
 
-              star = 0.25 * (upper[i][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + below[i][j])
+              star = 0.25 * (upper[i][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + below[i][j]) //in upper und lower schreiben
 
               if (options.inf_func == FUNC_FPISIN)
               {
@@ -84,16 +84,16 @@ void calculate(struct calculation_arguments arguments, struct calculation_result
 
               if(j == currentBlockEndIndicator)
               {
-                if(rank != lastRank)
+                if(line != N-1)
                 {
-                  MPI_Send(&Matrix_Out[i] + currentBlockStartIndicator, blockSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD)
+                  MPI_Send(&Matrix_Out[i] + currentBlockStartIndicator, blockSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD) //Versnden der Vorgängerzeile
                 }
                 currentBlockStartIndicator = currentBlockStartIndicator + blockSize
                 currentBlockEndIndicator = currentBlockSize + blockSize
               }
           }
       }
-      MPI_Allreduce(&maxresiduum, &recvmaxresiduum, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD); //ein globales maxresiduum der jewiligen Iteration bestimmen
+      MPI_Allreduce(&maxresiduum, &recvmaxresiduum, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD); //ein globales maxresiduum der jeweiligen Iteration bestimmen
       maxresiduum = recvmaxresiduum
 
       results.stat_iteration++
