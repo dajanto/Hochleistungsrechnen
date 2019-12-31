@@ -411,9 +411,83 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
 static
 void
-reachIteration(struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options, int finalIteration, double **halo_lines)
+reachIteration(struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options, int finalIteration, double **halo_lines, int cache_i, double **first_columns, int column_i)
 {
-    printf("Rank %d: Final Iteration should be %d, Currrent: %ld\n",arguments->rank, finalIteration, results->stat_iteration);
+    uint64_t i, j;                              /* local variables for loops */
+    double star;                                /* four times center value minus 4 neigh.b values */
+    uint64_t current_line;
+    int current_iteration = results->stat_iteration;
+    uint64_t chunkSize = arguments->chunkSize;
+    uint64_t N = arguments->N;
+    double const h = arguments->h;
+    uint64_t rowOffset = arguments->chunkStart - 1;
+    int cache_size = (arguments->nprocs - arguments->rank) * 2;
+    int columns_size = cache_size / 2;
+    double **Matrix = arguments->Matrix[0];
+
+    double pih = 0.0;
+    double fpisin = 0.0;
+
+    if (options->inf_func == FUNC_FPISIN)
+    {
+        pih = PI * h;
+        fpisin = TWO_PI_SQUARE * h * h;
+    }
+
+    if (current_iteration == finalIteration)
+    {
+        return;
+    }
+    else if (current_iteration < finalIteration)
+    {
+        printf("Rank %d Error: No Process should lag behind in Iterations, Expected greater than %d, Got %d\n", arguments->rank, finalIteration, current_iteration);
+        exit(1);
+    }
+
+    while (current_iteration > finalIteration)
+    {
+        cache_i = (cache_i - 2) % cache_size;
+        column_i = (column_i - 1) % columns_size;
+
+        /* over all rows in reverse */
+        for (i = chunkSize - 1; i > 0; i--)
+        {
+            current_line = i + rowOffset;
+            double *previous_line = Matrix[i - 1];
+            double *next_line = Matrix[i + 1];
+            if (i == 1)
+            {
+                previous_line = halo_lines[cache_i];
+            }
+            else if ((chunkSize - 1) == i)
+            {
+                next_line = halo_lines[cache_i + 1];
+            }
+            double fpisin_i = 0.0;
+
+            if (options->inf_func == FUNC_FPISIN)
+            {
+                fpisin_i = fpisin * sin(pih * (double)current_line);
+            }
+            /* over all columns in reverse */
+            for (j = N - 2; j > 1; j--)
+            {
+                star = previous_line[j] - Matrix[i][j-1] - next_line[j] - (4 * Matrix[i][j]);
+
+                if (options->inf_func == FUNC_FPISIN)
+                {
+                    star -= fpisin_i * sin(pih * (double)j);
+                }
+
+                Matrix[i][j + 1] = star;
+            }
+            Matrix[i][1] = first_columns[column_i][i];
+            // printRows(Matrix_In, i, i == 1, i == (chunkSize - 1), arguments, term_iteration);
+        }
+
+        current_iteration--;
+    }
+    // printf("Rank %d: Final Iteration should be %d, Currrent: %ld\n",arguments->rank, finalIteration, results->stat_iteration);
 }
 
 /* ************************************************************************ */
@@ -442,6 +516,7 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
     int previous_rank = rank - 1;
     int next_rank = rank + 1;
     int cache_i = 0;
+    int column_i = 0;
 
     int finalIteration = 0;
     int current_iteration = 0;
@@ -461,19 +536,24 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
     }
 
     uint64_t cache_size = (nprocs - rank) * 2;
+    uint64_t first_columns_size = (nprocs - rank);
     double **halo_lines_cache = allocateMemory(cache_size * sizeof(double*));
+    double **first_columns_cache = allocateMemory(first_columns_size * sizeof(double*));
 
     for (i = 0; i < cache_size; i++)
     {
         halo_lines_cache[i] = allocateMemoryEmpty(N + 1, sizeof(double));
     }
 
+    for (i = 0; i < first_columns_size; i++)
+    {
+        first_columns_cache[i] = allocateMemoryEmpty(chunkSize + 1, sizeof(double));
+    }
+
     const int SEND_ROW_DOWN_TAG = 1;
     const int SEND_ROW_UP_TAG = 2;
     const int SEND_RESIDUUM_DOWN_TAG = 3;
     const int SEND_FINISHED_UP_TAG = 4;
-
-
 
     while (term_iteration > 0)
     {
@@ -528,7 +608,10 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
             }
         }
 
-        maxresiduum = 0;
+        if (rank == 0)
+        {
+            maxresiduum = 0;
+        }
 
         /* over all rows */
         for (i = 1; i < chunkSize; i++)
@@ -563,6 +646,11 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
             // printRows(Matrix_In, i, i == 1, i == (chunkSize - 1), arguments, term_iteration);
         }
 
+        for (i = 0; i < chunkSize; i++)
+        {
+            first_columns_cache[column_i][i] = Matrix_In[i][1];
+        }
+
         if (rank < lastRank)
         {
             MPI_Send(Matrix_In[chunkSize - 1], N + 1, MPI_DOUBLE, next_rank, SEND_ROW_DOWN_TAG, MPI_COMM_WORLD);
@@ -572,39 +660,46 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
                 MPI_Send(&maxresiduum, 1, MPI_DOUBLE, next_rank, SEND_RESIDUUM_DOWN_TAG, MPI_COMM_WORLD);
             }
         }
-
-        results->stat_iteration++;
         current_iteration++;
         results->stat_precision = maxresiduum;
 
         if (cache_size)
         {
             cache_i = (cache_i + 2) % cache_size;
+            column_i = (column_i + 1) % first_columns_size;
         }
         if (options->termination == TERM_ITER)
         {
             term_iteration--;
         }
     }
-    for (i = 0; i < cache_size; i++)
-    {
-        int lastRow = i % 2;
-        if ((rank > 0 && !lastRow) || (rank < lastRank && lastRow))
-        {
-            int line = i % 2 ? chunkSize : 0;
-            printChunk(halo_lines_cache[i], N + 1, rank, i / 2, i, line, "Halo Line: ", "");
-        }
-    }
-    if (options->termination == TERM_PREC)
+    results->stat_iteration = current_iteration;
+    results->m = 0;
+
+     if (options->termination == TERM_PREC)
     {
         MPI_Bcast(&results->stat_precision, 1, MPI_DOUBLE, lastRank, MPI_COMM_WORLD);
-        reachIteration(arguments, results, options, finalIteration, halo_lines_cache);
+        results->stat_iteration = finalIteration;
+        reachIteration(arguments, results, options, finalIteration, halo_lines_cache, cache_i, first_columns_cache, first_columns_size);
     }
     else
     {
         MPI_Reduce(&maxresiduum, &results->stat_precision, 1, MPI_DOUBLE, MPI_MAX, lastRank, MPI_COMM_WORLD);
     }
-    results->m = 0;
+
+    for (i = 0; i < cache_size; i++)
+    {
+        free(halo_lines_cache[i]);
+    }
+
+    for (i = 0; i < first_columns_size; i++)
+    {
+        free(first_columns_cache[i]);
+    }
+    free(halo_lines_cache);
+    free(first_columns_cache);
+
+    
 }
 
 /* ************************************************************************ */
