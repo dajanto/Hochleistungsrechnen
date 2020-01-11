@@ -614,7 +614,6 @@ static
 void
 calculate_mpi_gseidel_wave (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
 {
-  printf("Frieso\n");
   uint64_t i, j;                                   /* local variables for loops */
   int m1, m2;                                 /* used as indices for old and new matrices */
   double star;                                /* four times center value minus 4 neigh.b values */
@@ -773,7 +772,7 @@ calculate_mpi_gseidel_wave (struct calculation_arguments const* arguments, struc
               term_iteration = 0;
           }
 
-          if ((rank == lastRank) && (0 > maxresiduum) && (maxresiduum < options->term_precision))
+          if ((rank == lastRank) && (0 < maxresiduum) && (maxresiduum < options->term_precision))
           {
               int indicator = 1;
               MPI_Send(&indicator, 1, MPI_INT, 0, 1, MPI_COMM_WORLD);   //benachrichtigen des 0. Prozesses, das die gewünschte Genaugkeit erreicht wurde; Tag 1
