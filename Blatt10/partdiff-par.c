@@ -34,24 +34,26 @@
 
 struct calculation_results
 {
-    uint64_t  m;
-    uint64_t  stat_iteration; /* number of current iteration                    */
-    double    stat_precision; /* actual precision of all slaves in iteration    */
+    uint64_t m;
+    uint64_t stat_iteration; /* number of current iteration                    */
+    double stat_precision;   /* actual precision of all slaves in iteration    */
 };
 
 struct calculation_arguments
 {
-    uint64_t  N;              /* number of spaces between lines (lines=N+1)     */
-    uint64_t  num_matrices;   /* number of matrices                             */
-    double    h;              /* length of a space between two lines            */
-    double    ***Matrix;      /* index matrix used for addressing M             */
-    double    *M;             /* two matrices with real values                  */
-    uint64_t  chunkSize;
-    uint64_t  chunkStart;
-    uint64_t  chunkEnd;
-    int  rank;
-    int  nprocs;
-    void  (*calculateFunction)(const struct calculation_arguments*, struct calculation_results*, struct options const*);
+    uint64_t N;            /* number of spaces between lines (lines=N+1)     */
+    uint64_t num_matrices; /* number of matrices                             */
+    double h;              /* length of a space between two lines            */
+    double ***Matrix;      /* index matrix used for addressing M             */
+    double *M;             /* two matrices with real values                  */
+    uint64_t chunkSize;
+    uint64_t chunkStart;
+    uint64_t chunkEnd;
+    int rank;
+    int nprocs;
+    void (*calculateFunction)(const struct calculation_arguments *, struct calculation_results *, struct options const *);
+    double **first_columns_cache;
+    double **halo_lines_cache;
 };
 
 /* ************************************************************************ */
@@ -59,16 +61,15 @@ struct calculation_arguments
 /* ************************************************************************ */
 
 /* time measurement variables */
-struct timeval start_time;       /* time when program started                      */
-struct timeval comp_time;        /* time when calculation completed                */
+struct timeval start_time; /* time when program started                      */
+struct timeval comp_time;  /* time when calculation completed                */
 
 /* ************************************************************************ */
 /* allocateMemory ()                                                        */
 /* allocates memory and quits if there was a memory allocation problem      */
 /* ************************************************************************ */
-static
-void*
-allocateMemory (size_t size)
+static void *
+allocateMemory(size_t size)
 {
     void *p;
 
@@ -85,9 +86,8 @@ allocateMemory (size_t size)
 /* allocateMemory ()                                                        */
 /* allocates memory and quits if there was a memory allocation problem      */
 /* ************************************************************************ */
-static
-void*
-allocateMemoryEmpty (size_t count, size_t size)
+static void *
+allocateMemoryEmpty(size_t count, size_t size)
 {
     void *p;
 
@@ -103,9 +103,8 @@ allocateMemoryEmpty (size_t count, size_t size)
 /* ************************************************************************ */
 /* freeMatrices: frees memory for matrices                                  */
 /* ************************************************************************ */
-static
-void
-freeMatrices (struct calculation_arguments* arguments)
+static void
+freeMatrices(struct calculation_arguments *arguments)
 {
     uint64_t i;
     for (i = 0; i < arguments->num_matrices; i++)
@@ -115,14 +114,33 @@ freeMatrices (struct calculation_arguments* arguments)
 
     free(arguments->Matrix);
     free(arguments->M);
+
+    if (arguments->halo_lines_cache)
+    {
+        uint64_t cache_size = (arguments->nprocs - arguments->rank) * 2;
+        for (i = 0; i < cache_size; i++)
+        {
+            free(arguments->halo_lines_cache[i]);
+        }
+        free(arguments->halo_lines_cache);
+    }
+
+    if (arguments->first_columns_cache)
+    {
+        uint64_t first_columns_size = (arguments->nprocs - arguments->rank);
+        for (i = 0; i < first_columns_size; i++)
+        {
+            free(arguments->first_columns_cache[i]);
+        }
+        free(arguments->first_columns_cache);
+    }
 }
 
 /* ************************************************************************ */
 /* allocateMatrices: allocates memory for matrices                          */
 /* ************************************************************************ */
-static
-void
-allocateMatrices (struct calculation_arguments* arguments)
+static void
+allocateMatrices(struct calculation_arguments *arguments, struct options const *options)
 {
     uint64_t i, j;
 
@@ -131,36 +149,57 @@ allocateMatrices (struct calculation_arguments* arguments)
     uint64_t const chunkLines = chunkSize + 1;
 
     arguments->M = allocateMemory(arguments->num_matrices * (chunkLines) * (N + 1) * sizeof(double));
-    arguments->Matrix = allocateMemory(arguments->num_matrices * sizeof(double**));
+    arguments->Matrix = allocateMemory(arguments->num_matrices * sizeof(double **));
 
     for (i = 0; i < arguments->num_matrices; i++)
     {
-        arguments->Matrix[i] = allocateMemory((chunkLines) * sizeof(double*));
+        arguments->Matrix[i] = allocateMemory((chunkLines) * sizeof(double *));
 
         for (j = 0; j <= chunkSize; j++)
         {
             arguments->Matrix[i][j] = arguments->M + (i * (chunkLines) * (N + 1)) + (j * (N + 1));
         }
     }
+
+    double **halo_lines_cache = NULL;
+    double **first_columns_cache = NULL;
+
+    if (options->method == METH_GAUSS_SEIDEL && arguments->nprocs > 1)
+    {
+        uint64_t cache_size = (arguments->nprocs - arguments->rank) * 2;
+        uint64_t first_columns_size = (arguments->nprocs - arguments->rank);
+
+        halo_lines_cache = allocateMemory(cache_size * sizeof(double *));
+        first_columns_cache = allocateMemory(first_columns_size * sizeof(double *));
+
+        for (i = 0; i < cache_size; i++)
+        {
+            halo_lines_cache[i] = allocateMemoryEmpty(N + 1, sizeof(double));
+        }
+
+        for (i = 0; i < first_columns_size; i++)
+        {
+            first_columns_cache[i] = allocateMemoryEmpty(chunkSize + 1, sizeof(double));
+        }
+    }
+    arguments->first_columns_cache = first_columns_cache;
+    arguments->halo_lines_cache = halo_lines_cache;
 }
 
-static
-double*
-get_line(const struct calculation_arguments* arguments, struct calculation_results* results, uint64_t line)
+static double *
+get_line(const struct calculation_arguments *arguments, struct calculation_results *results, uint64_t line)
 {
     return arguments->Matrix[results->m][line - arguments->chunkStart + 1];
 }
 
-static
-int
+static int
 ownsLine(uint64_t from, uint64_t to, uint64_t line)
 {
     return line >= from && line <= to;
 }
 
-static
-uint64_t
-indexToLine(const struct calculation_arguments* arguments, uint64_t index)
+static uint64_t
+indexToLine(const struct calculation_arguments *arguments, uint64_t index)
 {
     // printf("i: %5ld, offset - 1: %5ld, result: %5ld\n", index, arguments->chunkStart - 1, index + arguments->chunkStart - 1);
     return index + arguments->chunkStart - 1;
@@ -169,18 +208,17 @@ indexToLine(const struct calculation_arguments* arguments, uint64_t index)
 /* ************************************************************************ */
 /* initMatrices: Initialize matrix/matrices and some global variables       */
 /* ************************************************************************ */
-static
-void
-initMatrices (struct calculation_arguments* arguments, struct options const* options)
+static void
+initMatrices(struct calculation_arguments *arguments, struct options const *options)
 {
-    uint64_t g, i, j;                                /*  local variables for loops   */
+    uint64_t g, i, j; /*  local variables for loops   */
 
     uint64_t const N = arguments->N;
     uint64_t const chunkSize = arguments->chunkSize;
     double const h = arguments->h;
     uint64_t const from = arguments->chunkStart;
     uint64_t const to = arguments->chunkEnd;
-    double*** Matrix = arguments->Matrix;
+    double ***Matrix = arguments->Matrix;
 
     /* initialize matrix/matrices with zeros */
     for (g = 0; g < arguments->num_matrices; g++)
@@ -221,7 +259,7 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
                 {
                     Matrix[g][0][i] = 1.0 - (h * i);
                 }
-                
+
                 if (ownsLastLine)
                 {
                     Matrix[g][chunkSize][i] = h * i;
@@ -231,8 +269,7 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
     }
 }
 
-static
-char*
+static char *
 formatChunk(double *chunk, uint64_t size)
 {
     uint64_t maxLength = size * 7 + 1;
@@ -251,8 +288,7 @@ formatChunk(double *chunk, uint64_t size)
     return buffer;
 }
 
-static
-char*
+static char *
 formatChunkUI(uint64_t *chunk, uint64_t size)
 {
     uint64_t maxLength = size * 7 + 1;
@@ -271,8 +307,7 @@ formatChunkUI(uint64_t *chunk, uint64_t size)
     return buffer;
 }
 
-static
-void
+static void
 printChunk(double *chunk, uint64_t size, uint64_t rank, int iteration, uint64_t index, uint64_t line, char *before, char *after)
 {
     char *chunkChars = formatChunk(chunk, size);
@@ -280,8 +315,7 @@ printChunk(double *chunk, uint64_t size, uint64_t rank, int iteration, uint64_t 
     free(chunkChars);
 }
 
-static
-void
+static void
 printChunkUI(uint64_t *chunk, uint64_t size, uint64_t rank, int iteration, uint64_t index, uint64_t line, char *before, char *after)
 {
     char *chunkChars = formatChunkUI(chunk, size);
@@ -289,8 +323,7 @@ printChunkUI(uint64_t *chunk, uint64_t size, uint64_t rank, int iteration, uint6
     free(chunkChars);
 }
 
-static
-void
+static void
 printRows(double **Matrix, uint64_t row, int printPrior, int printNext, struct calculation_arguments *arguments, uint64_t term_iteration)
 {
     if (printPrior)
@@ -308,15 +341,14 @@ printRows(double **Matrix, uint64_t row, int printPrior, int printNext, struct c
 /* ************************************************************************ */
 /* calculate: solves the equation sequentially for either jacobi or gauß    */
 /* ************************************************************************ */
-static
-void
-calculate (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
+static void
+calculate(struct calculation_arguments const *arguments, struct calculation_results *results, struct options const *options)
 {
-    uint64_t i, j;                                   /* local variables for loops */
-    int m1, m2;                                 /* used as indices for old and new matrices */
-    double star;                                /* four times center value minus 4 neigh.b values */
-    double residuum;                            /* residuum of current iteration */
-    double maxresiduum;                         /* maximum residuum value of a slave in iteration */
+    uint64_t i, j;      /* local variables for loops */
+    int m1, m2;         /* used as indices for old and new matrices */
+    double star;        /* four times center value minus 4 neigh.b values */
+    double residuum;    /* residuum of current iteration */
+    double maxresiduum; /* maximum residuum value of a slave in iteration */
 
     uint64_t const N = arguments->N;
     double const h = arguments->h;
@@ -346,8 +378,8 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
     while (term_iteration > 0)
     {
-        double** Matrix_Out = arguments->Matrix[m1];
-        double** Matrix_In  = arguments->Matrix[m2];
+        double **Matrix_Out = arguments->Matrix[m1];
+        double **Matrix_In = arguments->Matrix[m2];
 
         maxresiduum = 0;
 
@@ -364,7 +396,7 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
             /* over all columns */
             for (j = 1; j < N; j++)
             {
-                star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
+                star = 0.25 * (Matrix_In[i - 1][j] + Matrix_In[i][j - 1] + Matrix_In[i][j + 1] + Matrix_In[i + 1][j]);
 
                 if (options->inf_func == FUNC_FPISIN)
                 {
@@ -409,13 +441,12 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
     results->m = m2;
 }
 
-static
-void
-reachIteration(struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options, int finalIteration, double **halo_lines, int cache_i, double **first_columns, int column_i)
+static void
+reachIteration(struct calculation_arguments const *arguments, struct calculation_results *results, struct options const *options, int finalIteration, double **halo_lines, int cache_i, double **first_columns, int column_i)
 {
-    uint64_t i, j;                              /* local variables for loops */
-    double star;                                /* four times center value minus 4 neigh.b values */
-    uint64_t current_line;
+    uint64_t i, j; /* local variables for loops */
+    double star;   /* four times center value minus 4 neigh.b values */
+    uint64_t current_line_index;
     int current_iteration = results->stat_iteration;
     uint64_t chunkSize = arguments->chunkSize;
     uint64_t N = arguments->N;
@@ -446,16 +477,18 @@ reachIteration(struct calculation_arguments const* arguments, struct calculation
 
     while (current_iteration > finalIteration)
     {
-        cache_i = (cache_i - 2) % cache_size;
-        column_i = (column_i - 1) % columns_size;
+        /* the C operator % is the remainder operator, not modulo (differences in handling negative numbers) -1 mod 2 = 1 , -1 % 2 = -1 */
+        cache_i = (cache_i + cache_size - 2) % cache_size;
+        column_i = (column_i + columns_size - 1) % columns_size;
 
         /* over all rows in reverse */
         for (i = chunkSize - 1; i > 0; i--)
         {
-            current_line = i + rowOffset;
+            current_line_index = i + rowOffset;
+            double *current_line = Matrix[i];
             double *previous_line = Matrix[i - 1];
             double *next_line = Matrix[i + 1];
-            if (i == 1)
+            if (i == 1 && arguments->rank > 0)
             {
                 previous_line = halo_lines[cache_i];
             }
@@ -467,41 +500,41 @@ reachIteration(struct calculation_arguments const* arguments, struct calculation
 
             if (options->inf_func == FUNC_FPISIN)
             {
-                fpisin_i = fpisin * sin(pih * (double)current_line);
+                fpisin_i = fpisin * sin(pih * (double)current_line_index);
             }
             /* over all columns in reverse */
-            for (j = N - 2; j > 1; j--)
+            for (j = N - 2; j > 0; j--)
             {
-                star = previous_line[j] - Matrix[i][j-1] - next_line[j] - (4 * Matrix[i][j]);
+                star = (4 * current_line[j]) - previous_line[j] - current_line[j - 1] - next_line[j];
 
                 if (options->inf_func == FUNC_FPISIN)
                 {
                     star -= fpisin_i * sin(pih * (double)j);
                 }
 
-                Matrix[i][j + 1] = star;
+                current_line[j + 1] = star;
             }
-            Matrix[i][1] = first_columns[column_i][i];
+            current_line[1] = first_columns[column_i][i];
             // printRows(Matrix_In, i, i == 1, i == (chunkSize - 1), arguments, term_iteration);
         }
 
         current_iteration--;
     }
+    results->stat_iteration = current_iteration;
     // printf("Rank %d: Final Iteration should be %d, Currrent: %ld\n",arguments->rank, finalIteration, results->stat_iteration);
 }
 
 /* ************************************************************************ */
 /* calculate: solves the equation of gauß seidel in parallel with mpi only  */
 /* ************************************************************************ */
-static
-void
-calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
+static void
+calculate_mpi_gseidel_block(struct calculation_arguments const *arguments, struct calculation_results *results, struct options const *options)
 {
-    uint64_t i, j;                              /* local variables for loops */
-    int m1, m2;                                 /* used as indices for old and new matrices */
-    double star;                                /* four times center value minus 4 neigh.b values */
-    double residuum;                            /* residuum of current iteration */
-    double maxresiduum = 0;                     /* maximum residuum value of a slave in iteration */
+    uint64_t i, j;          /* local variables for loops */
+    int m1, m2;             /* used as indices for old and new matrices */
+    double star;            /* four times center value minus 4 neigh.b values */
+    double residuum;        /* residuum of current iteration */
+    double maxresiduum = 0; /* maximum residuum value of a slave in iteration */
 
     uint64_t const N = arguments->N;
     double const h = arguments->h;
@@ -537,18 +570,8 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
 
     uint64_t cache_size = (nprocs - rank) * 2;
     uint64_t first_columns_size = (nprocs - rank);
-    double **halo_lines_cache = allocateMemory(cache_size * sizeof(double*));
-    double **first_columns_cache = allocateMemory(first_columns_size * sizeof(double*));
-
-    for (i = 0; i < cache_size; i++)
-    {
-        halo_lines_cache[i] = allocateMemoryEmpty(N + 1, sizeof(double));
-    }
-
-    for (i = 0; i < first_columns_size; i++)
-    {
-        first_columns_cache[i] = allocateMemoryEmpty(chunkSize + 1, sizeof(double));
-    }
+    double **halo_lines_cache = arguments->halo_lines_cache;
+    double **first_columns_cache = arguments->first_columns_cache;
 
     const int SEND_ROW_DOWN_TAG = 1;
     const int SEND_ROW_UP_TAG = 2;
@@ -557,20 +580,22 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
 
     while (term_iteration > 0)
     {
-        double** Matrix_Out = arguments->Matrix[m1];
-        double** Matrix_In  = arguments->Matrix[m2];
+        double **Matrix_Out = arguments->Matrix[m1];
+        double **Matrix_In = arguments->Matrix[m2];
 
         if (rank > 0)
         {
             if (options->termination == TERM_PREC && current_iteration >= check_end_iteration)
             {
+                // the last rank calculates always the smallest iteration, so it needs to signal when it should finish
                 if (rank == lastRank)
                 {
                     finalIteration = maxresiduum < options->term_precision ? current_iteration : 0;
                 }
+                //send the value of finalIteration to the previous neighbour, always zero if it should continue
                 MPI_Send(&finalIteration, 1, MPI_INT, previous_rank, SEND_FINISHED_UP_TAG, MPI_COMM_WORLD);
             }
-            // send the row with old values to the previous neighbor            
+            // send the row with old values to the previous neighbor
             MPI_Send(Matrix_In[1], N + 1, MPI_DOUBLE, previous_rank, SEND_ROW_UP_TAG, MPI_COMM_WORLD);
 
             // receive the first row with current values for this iteration
@@ -584,7 +609,7 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
 
             if (cache_size)
             {
-                memcpy(halo_lines_cache[cache_i], Matrix_In[0], N + 1);
+                memcpy(halo_lines_cache[cache_i], Matrix_In[0], (N + 1) * sizeof(double));
             }
         }
 
@@ -604,11 +629,11 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
 
             if (cache_size)
             {
-                memcpy(halo_lines_cache[cache_i + 1], Matrix_In[chunkSize], N + 1);
+                memcpy(halo_lines_cache[cache_i + 1], Matrix_In[chunkSize], (N + 1) * sizeof(double));
             }
         }
 
-        if (rank == 0)
+        if (rank == 0 || options->termination == TERM_ITER)
         {
             maxresiduum = 0;
         }
@@ -627,7 +652,7 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
             /* over all columns */
             for (j = 1; j < N; j++)
             {
-                star = 0.25 * (Matrix_In[i - 1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i + 1][j]);
+                star = 0.25 * (Matrix_In[i - 1][j] + Matrix_In[i][j - 1] + Matrix_In[i][j + 1] + Matrix_In[i + 1][j]);
 
                 if (options->inf_func == FUNC_FPISIN)
                 {
@@ -676,44 +701,29 @@ calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, stru
     results->stat_iteration = current_iteration;
     results->m = 0;
 
-     if (options->termination == TERM_PREC)
+    if (options->termination == TERM_PREC)
     {
         MPI_Bcast(&results->stat_precision, 1, MPI_DOUBLE, lastRank, MPI_COMM_WORLD);
-        results->stat_iteration = finalIteration;
-        reachIteration(arguments, results, options, finalIteration, halo_lines_cache, cache_i, first_columns_cache, first_columns_size);
+        /* Wrong? backwards calculation, wrong values, especially the lower the rank */
+        /* reachIteration(arguments, results, options, finalIteration, halo_lines_cache, cache_i, first_columns_cache, column_i); */
     }
     else
     {
-        MPI_Reduce(&maxresiduum, &results->stat_precision, 1, MPI_DOUBLE, MPI_MAX, lastRank, MPI_COMM_WORLD);
+        MPI_Reduce(&maxresiduum, &results->stat_precision, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     }
-
-    for (i = 0; i < cache_size; i++)
-    {
-        free(halo_lines_cache[i]);
-    }
-
-    for (i = 0; i < first_columns_size; i++)
-    {
-        free(first_columns_cache[i]);
-    }
-    free(halo_lines_cache);
-    free(first_columns_cache);
-
-    
 }
 
 /* ************************************************************************ */
 /* calculate: solves the equation with jacobi in paralel with open mp only  */
 /* ************************************************************************ */
-static
-void
-calculate_omp (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
+static void
+calculate_omp(struct calculation_arguments const *arguments, struct calculation_results *results, struct options const *options)
 {
-    uint64_t i, j;                                   /* local variables for loops */
-    int m1, m2;                                 /* used as indices for old and new matrices */
-    double star;                                /* four times center value minus 4 neigh.b values */
-    double residuum;                            /* residuum of current iteration */
-    double maxresiduum;                         /* maximum residuum value of a slave in iteration */
+    uint64_t i, j;      /* local variables for loops */
+    int m1, m2;         /* used as indices for old and new matrices */
+    double star;        /* four times center value minus 4 neigh.b values */
+    double residuum;    /* residuum of current iteration */
+    double maxresiduum; /* maximum residuum value of a slave in iteration */
 
     uint64_t const N = arguments->N;
     double const h = arguments->h;
@@ -743,12 +753,13 @@ calculate_omp (struct calculation_arguments const* arguments, struct calculation
 
     while (term_iteration > 0)
     {
-        double** Matrix_Out = arguments->Matrix[m1];
-        double** Matrix_In  = arguments->Matrix[m2];
+        double **Matrix_Out = arguments->Matrix[m1];
+        double **Matrix_In = arguments->Matrix[m2];
 
         maxresiduum = 0;
 
-        #pragma omp parallel for private(i, j, star, residuum) reduction(max: maxresiduum)
+#pragma omp parallel for private(i, j, star, residuum) reduction(max \
+                                                                 : maxresiduum)
         /* over all rows */
         for (i = 1; i < N; i++)
         {
@@ -762,7 +773,7 @@ calculate_omp (struct calculation_arguments const* arguments, struct calculation
             /* over all columns */
             for (j = 1; j < N; j++)
             {
-                star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
+                star = 0.25 * (Matrix_In[i - 1][j] + Matrix_In[i][j - 1] + Matrix_In[i][j + 1] + Matrix_In[i + 1][j]);
 
                 if (options->inf_func == FUNC_FPISIN)
                 {
@@ -808,16 +819,15 @@ calculate_omp (struct calculation_arguments const* arguments, struct calculation
 /* ************************************************************************ */
 /* calculate: solves the equation with jacobi in parallel with omp and mpi  */
 /* ************************************************************************ */
-static
-void
-calculate_mpi_jacobi (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
+static void
+calculate_mpi_jacobi(struct calculation_arguments const *arguments, struct calculation_results *results, struct options const *options)
 {
-    uint64_t i, j;                                   /* local variables for loops */
-    int m1, m2;                                 /* used as indices for old and new matrices */
-    double star;                                /* four times center value minus 4 neigh.b values */
-    double residuum;                            /* residuum of current iteration */
-    double maxresiduum;                         /* maximum residuum value of a slave in iteration */
-    double recvmaxresiduum;                     /* tmp holder for maximum residuum value of global in iteration */
+    uint64_t i, j;          /* local variables for loops */
+    int m1, m2;             /* used as indices for old and new matrices */
+    double star;            /* four times center value minus 4 neigh.b values */
+    double residuum;        /* residuum of current iteration */
+    double maxresiduum;     /* maximum residuum value of a slave in iteration */
+    double recvmaxresiduum; /* tmp holder for maximum residuum value of global in iteration */
 
     uint64_t const N = arguments->N;
     double const h = arguments->h;
@@ -867,12 +877,13 @@ calculate_mpi_jacobi (struct calculation_arguments const* arguments, struct calc
 
     while (term_iteration > 0)
     {
-        double** Matrix_Out = arguments->Matrix[m1];
-        double** Matrix_In  = arguments->Matrix[m2];
+        double **Matrix_Out = arguments->Matrix[m1];
+        double **Matrix_In = arguments->Matrix[m2];
 
         maxresiduum = 0;
 
-        #pragma omp parallel for private(i, j, star, residuum) reduction(max: maxresiduum)
+#pragma omp parallel for private(i, j, star, residuum) reduction(max \
+                                                                 : maxresiduum)
         /* over all rows */
         for (i = chunkSize - 1; i > 0; i--)
         {
@@ -886,7 +897,7 @@ calculate_mpi_jacobi (struct calculation_arguments const* arguments, struct calc
             /* over all columns */
             for (j = 1; j < N; j++)
             {
-                star = 0.25 * (Matrix_In[i-1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i+1][j]);
+                star = 0.25 * (Matrix_In[i - 1][j] + Matrix_In[i][j - 1] + Matrix_In[i][j + 1] + Matrix_In[i + 1][j]);
 
                 if (options->inf_func == FUNC_FPISIN)
                 {
@@ -951,9 +962,8 @@ calculate_mpi_jacobi (struct calculation_arguments const* arguments, struct calc
 /* ************************************************************************ */
 /* initVariables: Initializes some global variables                         */
 /* ************************************************************************ */
-static
-void
-initVariables (struct calculation_arguments* arguments, struct calculation_results* results, struct options const* options, uint64_t rank, uint64_t nprocs)
+static void
+initVariables(struct calculation_arguments *arguments, struct calculation_results *results, struct options const *options, uint64_t rank, uint64_t nprocs)
 {
     arguments->N = (options->interlines * 8) + 9 - 1;
     arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
@@ -962,28 +972,48 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     results->stat_iteration = 0;
     results->stat_precision = 0;
 
-    uint64_t chunkSize = (arguments->N - 1) / nprocs;
-    uint64_t chunkRest = (arguments->N - 1) % nprocs;
+    if (arguments->N < 50 || options->term_iteration < 50)
+    {
+        nprocs = 1;
+    }
 
-    // todo correct initialization for jacobi variants too
+    uint64_t total_lines = arguments->N - 1;
+    const uint64_t min_lines = 5;
+
+    if (min_lines > (total_lines / nprocs))
+    {
+        nprocs = total_lines / min_lines;
+    }
+
+    uint64_t chunkSize = total_lines / nprocs;
+    uint64_t chunkRest = total_lines % nprocs;
+
     if (chunkRest && chunkRest > rank)
     {
         chunkSize++;
     }
 
     uint64_t start = 1;
+    uint64_t end;
 
-    if (rank > 0)
+    if (nprocs > 1 && rank < nprocs)
     {
-        MPI_Recv(&start, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if (rank > 0)
+        {
+            MPI_Recv(&start, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        end = start + chunkSize - 1;
+
+        if (rank < (nprocs - 1))
+        {
+            uint64_t nextStart = end + 1;
+            MPI_Send(&nextStart, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+        }
     }
-
-    uint64_t end = start + chunkSize - 1;
-
-    if (rank < (nprocs - 1))
+    else
     {
-        uint64_t nextStart = end + 1;
-        MPI_Send(&nextStart, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+        end = start + chunkSize - 1;
     }
 
     if (options->method == METH_JACOBI)
@@ -1013,6 +1043,11 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
         }
     }
 
+    if (rank >= nprocs)
+    {
+        arguments->calculateFunction = NULL;
+    }
+
     arguments->chunkSize = chunkSize;
     arguments->chunkStart = start;
     arguments->chunkEnd = end;
@@ -1023,9 +1058,8 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
 /* ************************************************************************ */
 /*  displayStatistics: displays some statistics about the calculation       */
 /* ************************************************************************ */
-static
-void
-displayStatistics (struct calculation_arguments const* arguments, struct calculation_results const* results, struct options const* options)
+static void
+displayStatistics(struct calculation_arguments const *arguments, struct calculation_results const *results, struct options const *options)
 {
     int N = arguments->N;
     double time = (comp_time.tv_sec - start_time.tv_sec) + (comp_time.tv_usec - start_time.tv_usec) * 1e-6;
@@ -1044,7 +1078,7 @@ displayStatistics (struct calculation_arguments const* arguments, struct calcula
     }
 
     printf("\n");
-    printf("Interlines:         %" PRIu64 "\n",options->interlines);
+    printf("Interlines:         %" PRIu64 "\n", options->interlines);
     printf("Stoerfunktion:      ");
 
     if (options->inf_func == FUNC_F0)
@@ -1074,29 +1108,36 @@ displayStatistics (struct calculation_arguments const* arguments, struct calcula
     printf("\n");
 }
 
-static
-void
-displayMatrixSingle (struct calculation_arguments* arguments, struct calculation_results* results, struct options* options)
+static void
+displayMatrixSingle(struct calculation_arguments *arguments, struct calculation_results *results, struct options *options)
 {
     int x, y;
 
-    double** Matrix = arguments->Matrix[results->m];
+    double **Matrix = arguments->Matrix[results->m];
 
     int const interlines = options->interlines;
 
     printf("Matrix:\n");
-
-    for (y = 0; y < 9; y++)
+#ifdef ALL
+    int end = arguments->N + 1;
+#else
+    int end = 9;
+#endif
+    for (y = 0; y < end; y++)
     {
-        for (x = 0; x < 9; x++)
+        for (x = 0; x < end; x++)
         {
-            printf ("%7.4f", Matrix[y * (interlines + 1)][x * (interlines + 1)]);
+#ifdef ALL
+            printf("%7.4f", Matrix[y][x]);
+#else
+            printf("%7.4f", Matrix[y * (interlines + 1)][x * (interlines + 1)]);
+#endif
         }
 
-        printf ("\n");
+        printf("\n");
     }
 
-    fflush (stdout);
+    fflush(stdout);
 }
 
 /**
@@ -1109,14 +1150,13 @@ displayMatrixSingle (struct calculation_arguments* arguments, struct calculation
  * - Each process stores two halo lines in its matrix (except for ranks 0 and 3 that only store one).
  * - For instance: Rank 2 has four lines 0-3 but only calculates 1-2 because 0 and 3 are halo lines for other processes. It is responsible for (global) lines 5-6.
  */
-static
-void
-DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options, int rank, int size, int from, int to)
+static void
+DisplayMatrixMPI(struct calculation_arguments const *arguments, struct calculation_results *results, struct options const *options, int rank, int size, int from, int to)
 {
     int const elements = 8 * options->interlines + 9;
 
     int x, y;
-    double** Matrix = arguments->Matrix[results->m];
+    double **Matrix = arguments->Matrix[results->m];
     MPI_Status status;
 
     /* first line belongs to rank 0 */
@@ -1137,11 +1177,18 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
     {
         printf("Matrix:\n");
     }
-
-    for (y = 0; y < 9; y++)
+#ifdef ALL
+    int end = arguments->N + 1;
+#else
+    int end = 9;
+#endif
+    for (y = 0; y < end; y++)
     {
+#ifdef ALL
+        uint64_t line = y;
+#else
         uint64_t line = y * (options->interlines + 1);
-
+#endif
         if (rank == 0)
         {
             /* check whether this line belongs to rank 0 */
@@ -1161,7 +1208,8 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
                 /* if the line belongs to this process, send it to rank 0
                 * (line - from + 1) is used to calculate the correct local address */
                 MPI_Send(line_array, elements, MPI_DOUBLE, 0, 42 + y, MPI_COMM_WORLD);
-            }else
+            }
+            else
             {
                 // printf("Rank %d does not own line %ld\n", rank, line);
             }
@@ -1169,9 +1217,13 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
 
         if (rank == 0)
         {
-            for (x = 0; x < 9; x++)
+            for (x = 0; x < end; x++)
             {
+#ifdef ALL
+                int col = x;
+#else
                 int col = x * (options->interlines + 1);
+#endif
 
                 if (ownsLine(from, to, line))
                 {
@@ -1203,9 +1255,8 @@ DisplayMatrixMPI (struct calculation_arguments const* arguments, struct calculat
 /** ausgegeben wird. Aus der Matrix werden die Randzeilen/-spalten sowie   **/
 /** sieben Zwischenzeilen ausgegeben.                                      **/
 /****************************************************************************/
-static
-void
-displayMatrix (struct calculation_arguments* arguments, struct calculation_results* results, struct options* options)
+static void
+displayMatrix(struct calculation_arguments *arguments, struct calculation_results *results, struct options *options)
 {
     if (arguments->nprocs > 1)
     {
@@ -1215,14 +1266,12 @@ displayMatrix (struct calculation_arguments* arguments, struct calculation_resul
     {
         displayMatrixSingle(arguments, results, options);
     }
-    
 }
 
 /* ************************************************************************ */
 /*  main                                                                    */
 /* ************************************************************************ */
-int
-main (int argc, char** argv)
+int main(int argc, char **argv)
 {
     struct options options;
     struct calculation_arguments arguments;
@@ -1243,20 +1292,20 @@ main (int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
     initVariables(&arguments, &results, &options, world_rank, world_size);
 
-    printf(
-        "Rank: %d, Size: %d, N: %ld, Interlines: %ld. Threads: %ld, Chunksize: %ld, ChunkStart: %ld, ChunkEnd: %ld\n",
-        world_rank,
-        world_size,
-        arguments.N,
-        options.interlines,
-        options.number,
-        arguments.chunkSize,
-        arguments.chunkStart,
-        arguments.chunkEnd
-    );
+    // printf(
+    //     "Rank: %d, Size: %d, N: %ld, Interlines: %ld. Threads: %ld, Chunksize: %ld, ChunkStart: %ld, ChunkEnd: %ld\n",
+    //     world_rank,
+    //     world_size,
+    //     arguments.N,
+    //     options.interlines,
+    //     options.number,
+    //     arguments.chunkSize,
+    //     arguments.chunkStart,
+    //     arguments.chunkEnd
+    // );
     if (arguments.calculateFunction)
     {
-        allocateMatrices(&arguments);
+        allocateMatrices(&arguments, &options);
         initMatrices(&arguments, &options);
 
         gettimeofday(&start_time, NULL);
@@ -1267,13 +1316,9 @@ main (int argc, char** argv)
         {
             displayStatistics(&arguments, &results, &options);
         }
+        displayMatrix(&arguments, &results, &options);
+        freeMatrices(&arguments);
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    displayMatrix(&arguments, &results, &options);
-
-    freeMatrices(&arguments);
-
     MPI_Finalize();
 
     return 0;
