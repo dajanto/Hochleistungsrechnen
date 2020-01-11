@@ -1,0 +1,116 @@
+/*Anmerkung: Die 1. Zeile  von Prozess 0  bzw. die letzte vom Prozess mit dem höchsten Rang müssen noch vor dem Rechnen initialisiert werden, dies
+  ist im folgenden vernachlässigt. Diese würde dann in upper bzw below gespeichert werden.
+  */
+
+
+void calculate(struct calculation_arguments arguments, struct calculation_results results, struct options options)
+{
+  N = arguments.N
+  h = arguments.h
+  blockSize = arguments.blockSize //Größe eines Blockes
+  rank = arguments.rank
+  upper = arguments.upperLines // Buffer für die überliegende Halo-Line (ausgehend von der zu bearbeitenen Zeile)
+  below = arguments.belowLines // Buffer für die darunter liegende Halo Line (ausgehend von der zu bearbeitenen Zeile)
+  startLine = arguments.startLine // erste Zeile der Matrix für die der Prozess zuständig ist.
+  endLine = arguments.endLine // letzte Zeile für die der Prozess zuständig ist.
+  nprocs = arguments.nprocs
+
+  pih = 0.0
+  fpisin = 0.0
+
+  term_iteration = options.term_iteration
+
+  //Gauß-Seidel => m1 = m2 = 0
+  m1 = 0
+  m2 = 0
+
+  if (options.inf_func == FUNC_FPISIN)
+  {
+      pih = PI * h
+      fpisin = 0.25 * TWO_PI_SQUARE * h * h
+  }
+
+  while (term_iteration > 0)
+  {
+      Matrix_Out = arguments.Matrix[m1]
+      Matrix_In  = arguments.Matrix[m2]
+
+      maxresiduum = 0
+
+      /* over all rows
+    Annahme:  Die Zeilen für die die Prozesse zuständig sind, sind gleichmäßig auf die Prozesse verteilt;
+      bei einem Überlauf bekommen die ersten Prozesse jeweils eine zusätzliche Zeile */
+
+      for (i = startLine; i == endLine; i = i + nprocs)
+      {
+          line = i;
+          fpisin_i = 0.0
+
+          if (options.inf_func == FUNC_FPISIN)
+          {
+              fpisin_i = fpisin * sin(pih * (double)i) //i gelassen da es so im Originalcode vorhanden ist; line ginge auch
+          }
+
+          currentBlockStartIndicator = 1
+          currentBlockEndIndicator = blockSize
+          /* over all columns */
+          for (j = 1; j < N; j++)
+          {
+              if((line == 1) && (j >= currentBlockStartIndicator))
+              {
+                MPI_Send(&Matrix_Out[i] + currentBlockStartIndicator, blockSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD) //versenden der Nachfolgerzeile
+                MPI_Recv(upper[currentBlockStartIndicator], blockSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE) //empfangen der Vorgänger-Zeile
+              }
+              if((line == N-1) && (j > currentBlockEndIndicator))
+              {
+                MPI_Recv(below[currentBlockStartIndicator], blockSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE) //empfangen der Nachfolgerzeile
+              }
+
+              star = 0.25 * (upper[i][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + below[i][j]) //in upper und lower schreiben
+
+              if (options.inf_func == FUNC_FPISIN)
+              {
+                  star += fpisin_i * sin(pih * (double)j);
+              }
+
+              if (options.termination == TERM_PREC || term_iteration == 1)
+              {
+                  residuum = Matrix_In[i][j] - star
+                  residuum = (residuum < 0) ? -residuum : residuum
+                  maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum
+              }
+
+              Matrix_Out[i][j] = star
+
+              if(j == currentBlockEndIndicator)
+              {
+                if(line != N-1)
+                {
+                  MPI_Send(&Matrix_Out[i] + currentBlockStartIndicator, blockSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD) //Versnden der Vorgängerzeile
+                }
+                currentBlockStartIndicator = currentBlockStartIndicator + blockSize
+                currentBlockEndIndicator = currentBlockSize + blockSize
+              }
+          }
+      }
+      MPI_Allreduce(&maxresiduum, &recvmaxresiduum, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD); //ein globales maxresiduum der jeweiligen Iteration bestimmen
+      maxresiduum = recvmaxresiduum
+
+      results.stat_iteration++
+      results.stat_precision = maxresiduum
+
+      /* check for stopping calculation depending on termination method */
+      if (options.termination == TERM_PREC)
+      {
+          if (maxresiduum < options.term_precision)
+          {
+              term_iteration = 0
+          }
+      }
+      else if (options.termination == TERM_ITER)
+      {
+          term_iteration--
+      }
+    }
+  results.m = m2
+}

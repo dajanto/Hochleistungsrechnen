@@ -1,0 +1,217 @@
+Aufgabe 1)
+
+1. Der Begriff "Batch Queue" bedeutet quasi "Job Schlange". Es handelt sich hierbei
+   um eine Datenstruktur des Job-Schedulers. In ihr werden Jobs (Programme), die ausgeführt
+   werden sollen gespeichert (Job-Pool).Nutzer übergeben dem Job-Scheduler Jobs,
+   die ausgeführt werden sollen. Der Job-Scheduler trifft eine automatische Auswahl wann
+   welcher Jobs ausgeführt wird. Die Jobs werden im Hintergrund ausgeführt.
+
+   https://en.wikipedia.org/wiki/Job_scheduler
+   https://en.wikipedia.org/wiki/Job_queue
+
+2. Ein Batch-Queuing-System soll die Abarbeitung von Jobs automatisieren, hierzu
+   bietet es einige Features, wie z.B. die automatische Ausführung von Jobs, die
+   Möglichkeit Jobs bei der Ausführung zu beobachten und das Festlegen einer
+   Ausführungsreihenfolge nicht zusammenhängender Jobs.
+
+   https://en.wikipedia.org/wiki/Job_queue
+
+   Des Weiteren wird beim Scheduling auf eine faire Verteilung der vorhandenen
+   Ressourcen geachtet.
+
+   https://de.wikipedia.org/wiki/Scheduling
+
+3. Beispiele für Batch-Queuing-Systeme:
+    - Slurm Workload Manager
+    - Moab
+    - Condor
+
+    https://en.wikipedia.org/wiki/Job_scheduler
+
+4. man sbatch
+   Mit dem Befehl sbatch lassen sich batch-Skripte an Slurm übergeben.
+   Das Skript wird an den Slurm-Controller übergeben und bekommt eine Job-ID.
+   Das Skript bekommt nicht unbedingt sofort Ressourcen zugewiesen sondern, kann
+   erstmal in der Job Queue landen und auf seine Ausführung warten müssen.
+
+5. Es wird Slurm verwendet.
+
+6. mit dem Befehl squeue
+
+Beispiel:
+ritter@cluster:~$ squeue
+             JOBID PARTITION     NAME     USER ST       TIME  NODES NODELIST(REASON)
+             23253       amd job_scri  wannags PD       0:00      4 (Resources)
+             23254       amd job_scri  wannags PD       0:00      4 (Resources)
+             23255       amd job_scri  wannags PD       0:00      4 (Resources)
+             23256       amd job_scri  wannags PD       0:00      4 (Resources)
+             23257       amd job_scri  wannags PD       0:00      4 (Resources)
+
+https://slurm.schedmd.com/quickstart.html
+
+7. Der Befehl sview öffnet eine graphische Benutzeroberfläche in der sich eine
+   Vielzahl an Informationen über Knoten, Partitionen und Jobs, die von slurm
+   gemanaged werden anzeigen lassen. Es lässt sich durch einen Doppelklick
+   auf einen Job leicht eine Vielzahl weiterer Informationen zu dem Job anzeigen
+   lassen (Full info). Außerdem lassen sich im Admin-Modus viele Felder, wie
+   z.B. das Job time limit modifizieren.
+
+   Die Vorteile gegenüber squeue liegen in der Übersichtlichkeit der Darstellung
+   und das hinzukommende Jobs einem direkt angezeigt werden ohne den Befehl
+   noch einmal aufrufen zu müssen (es wird direkt geupdatet).
+
+   https://slurm.schedmd.com/sview.html
+
+8. Ja und zwar mit dem Befehl: scancel <Job-ID>
+
+9. Nein können sie nicht, wenn man eine Node allokiert ist sie für andere
+   Nutzer nicht mehr verfügbar und es lässt sich auch nur ein Job darauf ausführen.
+
+   Theoretisch lassen sich aber mehrere Jobs auf einer Node ausführen, sofern dies
+   eingestellt wird.
+
+   https://slurm.schedmd.com/cons_res_share.html
+
+10. Mit dem Befehl scontrol show job <jobid> -d lässt sich der detaillierte
+    Status eines Jobs herausfinden
+
+Beispiel:
+    ritter@cluster:~$ scontrol show job 23694 -d
+   JobId=23694 JobName=bash
+   UserId=ciegelski(1741) GroupId=hr-1920(1065) MCS_label=N/A
+   Priority=1983 Nice=0 Account=(null) QOS=(null)
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=0 Reboot=0 ExitCode=0:0
+   DerivedExitCode=0:0
+   RunTime=00:28:20 TimeLimit=06:00:00 TimeMin=N/A
+   SubmitTime=2019-11-02T00:09:46 EligibleTime=2019-11-02T00:09:46
+   StartTime=2019-11-02T00:09:46 EndTime=2019-11-02T06:09:46 Deadline=N/A
+   PreemptTime=None SuspendTime=None SecsPreSuspend=0
+   LastSchedEval=2019-11-02T00:09:46
+   Partition=west AllocNode:Sid=cluster:307
+   ReqNodeList=west7 ExcNodeList=(null)
+   NodeList=west7
+   BatchHost=west7
+   NumNodes=1 NumCPUs=24 NumTasks=1 CPUs/Task=1 ReqB:S:C:T=0:0:*:*
+   TRES=cpu=24,node=1,billing=24
+   Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=*
+     Nodes=west7 CPU_IDs=0-23 Mem=0 GRES_IDX=
+   MinCPUsNode=1 MinMemoryNode=0 MinTmpDiskNode=0
+   Features=(null) DelayBoot=00:00:00
+   Gres=(null) Reservation=(null)
+   OverSubscribe=NO Contiguous=0 Licenses=(null) Network=(null)
+   Command=(null)
+   WorkDir=/home/ciegelski
+   Power=
+
+https://slurm.schedmd.com/scontrol.html
+
+11. Es sind die Verfahren Gang-Scheduling, Backfill-Scheduling und Preemptive-Scheduling
+    möglich. Es wird Backfill-Scheduling verwendet.
+
+ritter@cluster:~$ scontrol show config | grep SchedulerType
+SchedulerType           = sched/backfill
+
+Backfill-Scheduling:
+Hierbei werden niedriger priorisierte vor höher priorisierten Jobs ausgeführt,
+sofern sich dadurch die Startzeit des höher priorisierten Jobs nicht verändert.
+
+https://slurm.schedmd.com/sched_config.html
+
+Gang-Scheduling:
+Beim Gang-Scheduling wird das Zeitscheiben-Prinzip verwendet, wenn mehrere Jobs
+auf eine Ressource zugreifen wollen, so bekommt 1 Job zur Zeit für ein festgelegtes
+Zeitintervall Zugriff auf die Ressource und wechselt sich dann mit den anderen
+Prozessen, die auf die Ressource zugreifen wollen ab. (Bei diesen erfolgt dasselbe
+Prinzip).
+
+https://slurm.schedmd.com/gang_scheduling.html
+
+Preemptive:
+Hierbei verdrängt ein höher priorisierter Job niedriger priorisierte Jobs von ihren
+Ressourcen, sofern der höher priorisierte Job die Ressourcen allokiert hat. Die niedriger
+priorisierten Jobs können ihre Arbeit, sobald der höher priorisierte Job fertig ist fortsetzen.
+In neueren Versionen von Slurm besteht die Möglichkeit einzustellen, dass die niedriger priorisierten
+Jobs wieder in die Job Queue kommen und ihre Arbeit auf anderen Ressourcen fortsetzen.
+
+https://slurm.schedmd.com/preempt.html
+
+12.
+ritter@cluster:~$ salloc -p west -w west7 hostname
+salloc: Granted job allocation 23724
+cluster
+salloc: Relinquishing job allocation 23724
+salloc: Job allocation 23724 has been revoked.
+
+https://slurm.schedmd.com/salloc.html
+
+13. Das Timelimit beträgt 6h. Dies lässt sich z.B. mit dem Befehl sinfo herausfinden:
+ritter@cluster:~$ sinfo
+PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+abu          up    6:00:00      3  down* abu[3-5]
+abu          up    6:00:00      2   idle abu[1-2]
+amd          up    6:00:00      2  down* amd[1,5]
+amd          up    6:00:00      3   idle amd[2-4]
+magny        up    6:00:00      1   idle magny1
+nehalem      up    6:00:00      1   idle nehalem5
+west         up    6:00:00     10   idle west[1-10]
+
+14. Die Job Priorität lässt sich mit scontrol show job 23257 | grep Priority
+nachschauen:
+ritter@cluster:~$ scontrol show job 23726 | grep Priority
+   Priority=1983 Nice=0 Account=(null) QOS=(null)
+
+Die Job Priorität lässt sich mit scontrol update jobid=<jobid> Priority=0
+ändern:
+
+ritter@cluster:~$ scontrol update jobid=23726 priority=0
+ritter@cluster:~$ scontrol show job 23726 | grep Priority
+   Priority=0 Nice=0 Account=(null) QOS=(null)
+
+Hier wurde die Priorität auf 0 gesetzt und somit der Prozess angehalten.
+Nur root und der Slurm-Administrator können die Priorität erhöhen.
+
+https://slurm.schedmd.com/scontrol.html
+
+15. Folgende Partitionen stehen zur Verfügung:
+ritter@cluster:~$ scontrol show partition | grep PartitionName
+PartitionName=abu
+PartitionName=amd
+PartitionName=magny
+PartitionName=nehalem
+PartitionName=west
+
+Der Parameter -p <PartitionName> ermöglicht es einem z.B. beim submitten eines
+Batch Scriptes (mit sbatch) die gewünschte Partition zu wählen.
+
+Aufgabe 2)
+2.1
+ritter@cluster:~/test$ ./timescript 
+cluster: 2019-11-02T14:03:33,238134790+01:00
+
+2.2/2.3
+ritter@cluster:~/test$ sbatch job_script
+Submitted batch job 23823
+ritter@cluster:~/test$ cat timescript.out 
+west1: 2019-11-02T14:04:57,935369735+01:00
+west4: 2019-11-02T14:04:57,957774848+01:00
+west2: 2019-11-02T14:04:57,958178978+01:00
+west3: 2019-11-02T14:04:57,959707799+01:00
+ritter@cluster:~/test$ cat job_script.out
+fertig
+ritter@cluster:~/test$ sbatch job_script
+Submitted batch job 23825
+ritter@cluster:~/test$ cat timescript.out 
+west1: 2019-11-02T14:05:15,018681778+01:00
+west2: 2019-11-02T14:05:15,041741107+01:00
+west3: 2019-11-02T14:05:15,042320784+01:00
+west4: 2019-11-02T14:05:15,044383205+01:00
+ritter@cluster:~/test$ cat job_script.out
+fertig
+
+2.4
+Frage 1: Mehrfache Aufrufe des Job-Scriptes zeigen, dass die einzelnen Jobs in variierender Reihenfolge beendet werden.
+(Erkennbar an der unterschiedlichen Reihenfolge der Hostnamen).
+
+Frage 2: Nein, dies sollte nicht gehen, da es zur Situation kommen kann, dass mehrere Jobs gleichzeitig in die Datei schreiben wollen
+und sich ggf. überschreiben (lost update). 
