@@ -1,0 +1,6 @@
+#!/bin/bash
+#SBATCH -N 1 -n 12 -p west
+#SBATCH -o job_script_test.out
+
+mpirun ./partdiff-par 1 1 0 2 2 48
+

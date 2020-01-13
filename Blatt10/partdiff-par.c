@@ -82,25 +82,6 @@ allocateMemory (size_t size)
 }
 
 /* ************************************************************************ */
-/* allocateMemory ()                                                        */
-/* allocates memory and quits if there was a memory allocation problem      */
-/* ************************************************************************ */
-static
-void*
-allocateMemoryEmpty (size_t count, size_t size)
-{
-    void *p;
-
-    if ((p = calloc(count, size)) == NULL)
-    {
-        printf("Speicherprobleme! (%" PRIu64 " Bytes angefordert)\n", size * count);
-        exit(1);
-    }
-
-    return p;
-}
-
-/* ************************************************************************ */
 /* freeMatrices: frees memory for matrices                                  */
 /* ************************************************************************ */
 static
@@ -231,80 +212,6 @@ initMatrices (struct calculation_arguments* arguments, struct options const* opt
     }
 }
 
-// static
-// char*
-// formatChunk(double *chunk, uint64_t size)
-// {
-//     uint64_t maxLength = size * 7 + 1;
-//     char *buffer = calloc(maxLength, sizeof(char));
-//     int index = 0;
-//     for (uint64_t i = 0; i < size; i++)
-//     {
-//         int written = snprintf(&buffer[index], maxLength - index, "%7.4f", chunk[i]);
-//         if (written < 0)
-//         {
-//             printf("Could not append item to buffer\n");
-//             exit(1);
-//         }
-//         index += written;
-//     }
-//     return buffer;
-// }
-//
-// static
-// char*
-// formatChunkUI(uint64_t *chunk, uint64_t size)
-// {
-//     uint64_t maxLength = size * 7 + 1;
-//     char *buffer = calloc(maxLength, sizeof(char));
-//     int index = 0;
-//     for (uint64_t i = 0; i < size; i++)
-//     {
-//         int written = snprintf(&buffer[index], maxLength - index, "%ld ", chunk[i]);
-//         if (written < 0)
-//         {
-//             printf("Could not append item to buffer\n");
-//             exit(1);
-//         }
-//         index += written;
-//     }
-//     return buffer;
-// }
-//
-// static
-// void
-// printChunk(double *chunk, uint64_t size, uint64_t rank, int iteration, uint64_t index, uint64_t line, char *before, char *after)
-// {
-//     char *chunkChars = formatChunk(chunk, size);
-//     printf("%sRank %2ld Iteration %2d, Row %2ld(%2ld): %s%s\n", before ? before : "", rank, iteration, index, line, chunkChars, after ? after : "");
-//     free(chunkChars);
-// }
-//
-// static
-// void
-// printChunkUI(uint64_t *chunk, uint64_t size, uint64_t rank, int iteration, uint64_t index, uint64_t line, char *before, char *after)
-// {
-//     char *chunkChars = formatChunkUI(chunk, size);
-//     printf("%sRank %2ld Iteration %2d, Row %2ld(%2ld): %s%s\n", before ? before : "", rank, iteration, index, line, chunkChars, after ? after : "");
-//     free(chunkChars);
-// }
-//
-// static
-// void
-// printRows(double **Matrix, uint64_t row, int printPrior, int printNext, struct calculation_arguments *arguments, uint64_t term_iteration)
-// {
-//     if (printPrior)
-//     {
-//         printChunk(Matrix[row - 1], arguments->N + 1, arguments->rank, term_iteration, row - 1, indexToLine(arguments, row) - 1, "", "");
-//     }
-//     printChunk(Matrix[row], arguments->N + 1, arguments->rank, term_iteration, row, indexToLine(arguments, row), "", "");
-//     if (printNext)
-//     {
-//         printChunk(Matrix[row + 1], arguments->N + 1, arguments->rank, term_iteration, row + 1, indexToLine(arguments, row) + 1, "", "");
-//     }
-//     fflush(stdout);
-// }
-
 /* ************************************************************************ */
 /* calculate: solves the equation sequentially for either jacobi or gauß    */
 /* ************************************************************************ */
@@ -408,204 +315,6 @@ calculate (struct calculation_arguments const* arguments, struct calculation_res
 
     results->m = m2;
 }
-//
-// static
-// void
-// reachIteration(struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options, int finalIteration, double **halo_lines)
-// {
-//     printf("Rank %d: Final Iteration should be %d, Currrent: %ld\n",arguments->rank, finalIteration, results->stat_iteration);
-// }
-//
-// /* ************************************************************************ */
-// /* calculate: solves the equation of gauß seidel in parallel with mpi only  */
-// /* ************************************************************************ */
-// static
-// void
-// calculate_mpi_gseidel_block (struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
-// {
-//     uint64_t i, j;                              /* local variables for loops */
-//     int m1, m2;                                 /* used as indices for old and new matrices */
-//     double star;                                /* four times center value minus 4 neigh.b values */
-//     double residuum;                            /* residuum of current iteration */
-//     double maxresiduum = 0;                     /* maximum residuum value of a slave in iteration */
-//
-//     uint64_t const N = arguments->N;
-//     double const h = arguments->h;
-//     int term_iteration = options->term_iteration;
-//
-//     uint64_t chunkSize = arguments->chunkSize;
-//     uint64_t rowOffset = arguments->chunkStart - 1;
-//     int nprocs = arguments->nprocs;
-//     int rank = arguments->rank;
-//     int lastRank = nprocs - 1;
-//     uint64_t current_line;
-//     int previous_rank = rank - 1;
-//     int next_rank = rank + 1;
-//     int cache_i = 0;
-//
-//     int finalIteration = 0;
-//     int current_iteration = 0;
-//     int check_end_iteration = nprocs - rank - 1;
-//
-//     double pih = 0.0;
-//     double fpisin = 0.0;
-//
-//     /* as this algorithm is exclusive for gauß seidel, no check is needed */
-//     m1 = 0;
-//     m2 = 0;
-//
-//     if (options->inf_func == FUNC_FPISIN)
-//     {
-//         pih = PI * h;
-//         fpisin = 0.25 * TWO_PI_SQUARE * h * h;
-//     }
-//
-//     uint64_t cache_size = (nprocs - rank) * 2;
-//     double **halo_lines_cache = allocateMemory(cache_size * sizeof(double*));
-//
-//     for (i = 0; i < cache_size; i++)
-//     {
-//         halo_lines_cache[i] = allocateMemoryEmpty(N + 1, sizeof(double));
-//     }
-//
-//     const int SEND_ROW_DOWN_TAG = 1;
-//     const int SEND_ROW_UP_TAG = 2;
-//     const int SEND_RESIDUUM_DOWN_TAG = 3;
-//     const int SEND_FINISHED_UP_TAG = 4;
-//
-//
-//
-//     while (term_iteration > 0)
-//     {
-//         double** Matrix_Out = arguments->Matrix[m1];
-//         double** Matrix_In  = arguments->Matrix[m2];
-//
-//         if (rank > 0)
-//         {
-//             if (options->termination == TERM_PREC && current_iteration >= check_end_iteration)
-//             {
-//                 if (rank == lastRank)
-//                 {
-//                     finalIteration = maxresiduum < options->term_precision ? current_iteration : 0;
-//                 }
-//                 MPI_Send(&finalIteration, 1, MPI_INT, previous_rank, SEND_FINISHED_UP_TAG, MPI_COMM_WORLD);
-//             }
-//             // send the row with old values to the previous neighbor
-//             MPI_Send(Matrix_In[1], N + 1, MPI_DOUBLE, previous_rank, SEND_ROW_UP_TAG, MPI_COMM_WORLD);
-//
-//             // receive the first row with current values for this iteration
-//             MPI_Recv(Matrix_In[0], N + 1, MPI_DOUBLE, previous_rank, SEND_ROW_DOWN_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//
-//             if (options->termination == TERM_PREC)
-//             {
-//                 // get the maxresiduum for this iteration from previous rank
-//                 MPI_Recv(&maxresiduum, 1, MPI_DOUBLE, previous_rank, SEND_RESIDUUM_DOWN_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//             }
-//
-//             if (cache_size)
-//             {
-//                 memcpy(halo_lines_cache[cache_i], Matrix_In[0], N + 1);
-//             }
-//         }
-//
-//         if (finalIteration)
-//         {
-//             break;
-//         }
-//
-//         if (rank < lastRank)
-//         {
-//             if (options->termination == TERM_PREC && current_iteration >= (check_end_iteration - 1))
-//             {
-//                 MPI_Recv(&finalIteration, 1, MPI_INT, next_rank, SEND_FINISHED_UP_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//             }
-//             MPI_Recv(Matrix_In[chunkSize], N + 1, MPI_DOUBLE, next_rank, SEND_ROW_UP_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//             // printf("Rank %2d, Iteration %d, Receiving Last Halo Line\n", rank, current_iteration);
-//
-//             if (cache_size)
-//             {
-//                 memcpy(halo_lines_cache[cache_i + 1], Matrix_In[chunkSize], N + 1);
-//             }
-//         }
-//
-//         maxresiduum = 0;
-//
-//         /* over all rows */
-//         for (i = 1; i < chunkSize; i++)
-//         {
-//             current_line = i + rowOffset;
-//
-//             double fpisin_i = 0.0;
-//
-//             if (options->inf_func == FUNC_FPISIN)
-//             {
-//                 fpisin_i = fpisin * sin(pih * (double)current_line);
-//             }
-//             /* over all columns */
-//             for (j = 1; j < N; j++)
-//             {
-//                 star = 0.25 * (Matrix_In[i - 1][j] + Matrix_In[i][j-1] + Matrix_In[i][j+1] + Matrix_In[i + 1][j]);
-//
-//                 if (options->inf_func == FUNC_FPISIN)
-//                 {
-//                     star += fpisin_i * sin(pih * (double)j);
-//                 }
-//
-//                 if (options->termination == TERM_PREC || term_iteration == 1)
-//                 {
-//                     residuum = Matrix_In[i][j] - star;
-//                     residuum = (residuum < 0) ? -residuum : residuum;
-//                     maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
-//                 }
-//
-//                 Matrix_Out[i][j] = star;
-//             }
-//             // printRows(Matrix_In, i, i == 1, i == (chunkSize - 1), arguments, term_iteration);
-//         }
-//
-//         if (rank < lastRank)
-//         {
-//             MPI_Send(Matrix_In[chunkSize - 1], N + 1, MPI_DOUBLE, next_rank, SEND_ROW_DOWN_TAG, MPI_COMM_WORLD);
-//
-//             if (options->termination == TERM_PREC)
-//             {
-//                 MPI_Send(&maxresiduum, 1, MPI_DOUBLE, next_rank, SEND_RESIDUUM_DOWN_TAG, MPI_COMM_WORLD);
-//             }
-//         }
-//
-//         results->stat_iteration++;
-//         current_iteration++;
-//         results->stat_precision = maxresiduum;
-//
-//         if (cache_size)
-//         {
-//             cache_i = (cache_i + 2) % cache_size;
-//         }
-//         if (options->termination == TERM_ITER)
-//         {
-//             term_iteration--;
-//         }
-//     }
-//     for (i = 0; i < cache_size; i++)
-//     {
-//         int lastRow = i % 2;
-//         if ((rank > 0 && !lastRow) || (rank < lastRank && lastRow))
-//         {
-//             int line = i % 2 ? chunkSize : 0;
-//             printChunk(halo_lines_cache[i], N + 1, rank, i / 2, i, line, "Halo Line: ", "");
-//         }
-//     }
-//     if (options->termination == TERM_PREC)
-//     {
-//         MPI_Bcast(&results->stat_precision, 1, MPI_DOUBLE, lastRank, MPI_COMM_WORLD);
-//         reachIteration(arguments, results, options, finalIteration, halo_lines_cache);
-//     }
-//     else
-//     {
-//         MPI_Reduce(&maxresiduum, &results->stat_precision, 1, MPI_DOUBLE, MPI_MAX, lastRank, MPI_COMM_WORLD);
-//     }
-//     results->m = 0;
-// }
 
 /* ************************************************************************ */
 /* calculate: solves the equation of gauß seidel in parallel with mpi only  */
@@ -619,7 +328,7 @@ calculate_mpi_gseidel_wave (struct calculation_arguments const* arguments, struc
   double star;                                /* four times center value minus 4 neigh.b values */
   double residuum;                            /* residuum of current iteration */
   double maxresiduum;                         /* maximum residuum value of a slave in iteration */
-  int flag;
+  int flag;                                   //flag die signalisiert. dass der letzte Prozess die gewünschte Genaugkeit erreicht hat.
 
   uint64_t const N = arguments->N;
   double const h = arguments->h;
@@ -1047,56 +756,86 @@ initVariables (struct calculation_arguments* arguments, struct calculation_resul
     results->stat_iteration = 0;
     results->stat_precision = 0;
 
-    uint64_t chunkSize = (arguments->N - 1) / nprocs;
-    uint64_t chunkRest = (arguments->N - 1) % nprocs;
+    /*
+      Führe die sequentielle Variante aus, falls sich die parallele nicht lohnt.
+    */
+    // if (arguments->N < 50 || options->term_iteration < 50)
+    //     {
+    //         nprocs = 1;
+    //     }
 
-    // todo correct initialization for jacobi variants too
-    if (chunkRest && chunkRest > rank)
-    {
-        chunkSize++;
-    }
 
-    uint64_t start = 1;
+        uint64_t total_lines = arguments->N - 1;
+        const uint64_t min_lines = 1;                 //Setze mindeste Anzahl an Zeilen die ein Prozess bearbeiten soll auf 1 (zur sinnvollen Abarbeitung)
 
-    if (rank > 0)
-    {
-        MPI_Recv(&start, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-
-    uint64_t end = start + chunkSize - 1;
-
-    if (rank < (nprocs - 1))
-    {
-        uint64_t nextStart = end + 1;
-        MPI_Send(&nextStart, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
-    }
-
-    if (options->method == METH_JACOBI)
-    {
-        if (nprocs == 1)
+        if (min_lines > (total_lines / nprocs))
         {
-            arguments->calculateFunction = calculate_omp;
-            chunkSize = arguments->N;
+            nprocs = total_lines / min_lines;
+        }
+
+
+        uint64_t chunkSize = total_lines / nprocs;
+        uint64_t chunkRest = total_lines % nprocs;
+
+        if (chunkRest && chunkRest > rank)
+        {
+            chunkSize++;
+        }
+
+        uint64_t start = 1;
+        uint64_t end;
+
+        if (nprocs > 1 && rank < nprocs)
+        {
+            if (rank > 0)
+            {
+                MPI_Recv(&start, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            }
+
+            end = start + chunkSize - 1;
+
+            if (rank < (nprocs - 1))
+            {
+                uint64_t nextStart = end + 1;
+                MPI_Send(&nextStart, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+            }
         }
         else
         {
-            arguments->calculateFunction = calculate_mpi_jacobi;
-            chunkSize++;
+            end = start + chunkSize - 1;
         }
-    }
-    else
-    {
-        if (nprocs == 1)
+
+        if (options->method == METH_JACOBI)
         {
-            arguments->calculateFunction = calculate;
-            chunkSize = arguments->N;
+            if (nprocs == 1)
+            {
+                arguments->calculateFunction = calculate_omp;
+                chunkSize = arguments->N;
+            }
+            else
+            {
+                arguments->calculateFunction = calculate_mpi_jacobi;
+                chunkSize++;
+            }
         }
         else
         {
-            arguments->calculateFunction = calculate_mpi_gseidel_wave;
-            chunkSize++;
+            if (nprocs == 1)
+            {
+                arguments->calculateFunction = calculate;
+                chunkSize = arguments->N;
+            }
+            else
+            {
+                arguments->calculateFunction = calculate_mpi_gseidel_wave;
+                chunkSize++;
+            }
         }
-    }
+
+        if (rank >= nprocs)
+        {
+            arguments->calculateFunction = NULL;
+        }
 
     arguments->chunkSize = chunkSize;
     arguments->chunkStart = start;
@@ -1328,17 +1067,17 @@ main (int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
     initVariables(&arguments, &results, &options, world_rank, world_size);
 
-    printf(
-        "Rank: %d, Size: %d, N: %ld, Interlines: %ld. Threads: %ld, Chunksize: %ld, ChunkStart: %ld, ChunkEnd: %ld\n",
-        world_rank,
-        world_size,
-        arguments.N,
-        options.interlines,
-        options.number,
-        arguments.chunkSize,
-        arguments.chunkStart,
-        arguments.chunkEnd
-    );
+    // printf(
+    //     "Rank: %d, Size: %d, N: %ld, Interlines: %ld. Threads: %ld, Chunksize: %ld, ChunkStart: %ld, ChunkEnd: %ld\n",
+    //     world_rank,
+    //     world_size,
+    //     arguments.N,
+    //     options.interlines,
+    //     options.number,
+    //     arguments.chunkSize,
+    //     arguments.chunkStart,
+    //     arguments.chunkEnd
+    // );
     if (arguments.calculateFunction)
     {
         allocateMatrices(&arguments);
@@ -1352,12 +1091,10 @@ main (int argc, char** argv)
         {
             displayStatistics(&arguments, &results, &options);
         }
+        displayMatrix(&arguments, &results, &options);
+
+        freeMatrices(&arguments);
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    displayMatrix(&arguments, &results, &options);
-
-    freeMatrices(&arguments);
 
     MPI_Finalize();
 

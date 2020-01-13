@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH -N 1 -n 3 -p west
+#SBATCH -o job_script2.out
+
+mpirun ./partdiff-par 1 1 0 2 2 48
+echo ""
+mpirun ./partdiff-par 1 1 0 2 1 1e-4
+echo ""
+mpirun ./partdiff-par 1 1 0 1 2 47
+echo ""
+mpirun ./partdiff-par 1 1 0 1 1 1e-4
