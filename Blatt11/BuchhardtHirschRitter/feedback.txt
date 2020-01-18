@@ -1,0 +1,21 @@
+Die Bearbeitungszeit bitte in ganzen Stunden angeben (aufrunden).
+In den restlichen Zeilen jeweils ein X in der zutreffenden Spalte setzen.
+
+Bearbeitungszeit: 8 Stunden
+Schwierigkeit:     [ ] zu leicht         [X] genau richtig     [ ] zu schwer
+Lehrreich:         [ ] wenig             [ ] etwas             [X] sehr
+Verständlichkeit:  [ ] großteils unklar  [ ] teilweise unklar  [X] verständlich
+
+Kommentar:
+Zeitaufwand zu groß? Wo sind Sie nicht weiter gekommen?
+
+Der Zeitaufwand war angemessen, allerdings hätte uns ein  Hinweis geholfen kein OpenMP zu nutzen.
+
+Was war zu schwer oder unverständlich?
+Eigentlich nichts.
+
+Was könnten wir verbessern?
+Den oben genannten Hinweis aufs Aufgabenblatt schreiben.
+
+Was hat Ihnen besonders gut gefallen?
+Das Jobsscripts bereit gestellt wurden, die einem das Sammeln der Daten erheblich erleichterten.
